@@ -127,7 +127,6 @@ public class TSRHandler implements Listener
         if (logFileWriter != null)
             logFileWriter.close();
 
-
         lastMessageTime = System.currentTimeMillis();
         StompConnectionHandler.lastMessageTimeGeneral = lastMessageTime;
         StompConnectionHandler.ack(headers.get("ack"));

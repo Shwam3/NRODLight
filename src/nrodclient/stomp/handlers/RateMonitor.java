@@ -23,7 +23,7 @@ public class RateMonitor implements Listener
     private static PrintWriter logStream;
     private static File        logFile;
     private static String      lastLogDate = "";
-    private final String[]     topics = {"/topic/TRAIN_MVT_ALL_TOC", "/topic/RTPPM_ALL", "/topic/VSTP_ALL", "/topic/TSR_ALL_ROUTE"};
+    private final String[]     topics = {"/topic/TRAIN_MVT_ALL_TOC", "/topic/RTPPM_ALL", "/topic/VSTP_ALL", "/topic/TSR_ALL_ROUTE", "/topic/TD_ANG_SIG_AREA"};
 
     private static Listener instance = null;
     private RateMonitor()
