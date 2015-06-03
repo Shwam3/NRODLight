@@ -46,9 +46,10 @@ public class NRODClient
 
     public static final File EASMStorageDir = new File(System.getProperty("user.home", "C:") + File.separator + ".easigmap");
 
-    public static SimpleDateFormat sdfTime     = new SimpleDateFormat("HH:mm:ss");
-    public static SimpleDateFormat sdfDate     = new SimpleDateFormat("dd/MM/YY");
-    public static SimpleDateFormat sdfDateTime = new SimpleDateFormat("dd/MM/YY HH:mm:ss");
+    public static SimpleDateFormat sdfTime          = new SimpleDateFormat("HH:mm:ss");
+    public static SimpleDateFormat sdfDate          = new SimpleDateFormat("dd/MM/YY");
+    public static SimpleDateFormat sdfDateTime      = new SimpleDateFormat("dd/MM/YY HH:mm:ss");
+    public static SimpleDateFormat sdfDateTimeShort = new SimpleDateFormat("dd/MM HH:mm:ss");
 
   //public  static final Object logfileLock = new Object();
     public  static PrintStream  logStream;
@@ -60,17 +61,25 @@ public class NRODClient
     private static boolean  trayIconAdded = false;
     private static TrayIcon sysTrayIcon = null;
 
+    public static PrintStream stdOut = System.out;
+    public static PrintStream stdErr = System.err;
+
     public static void main(String[] args)
     {
         try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()); }
         catch (ClassNotFoundException | InstantiationException | IllegalAccessException | UnsupportedLookAndFeelException e) { printThrowable(e, "Look & Feel"); }
 
-        Date logDate = new Date(System.currentTimeMillis());
+        Date logDate = new Date();
         logFile = new File(EASMStorageDir, "Logs" + File.separator + "NRODClient" + File.separator + sdfDate.format(logDate).replace("/", "-") + ".log");
         logFile.getParentFile().mkdirs();
         lastLogDate = sdfDate.format(logDate);
 
-        try { logStream = new PrintStream(new FileOutputStream(logFile, logFile.length() > 0)); }
+        try
+        {
+            logStream = new PrintStream(new FileOutputStream(logFile, logFile.length() > 0), true);
+            System.setOut(logStream);
+            System.setErr(logStream);
+        }
         catch (FileNotFoundException e) { printErr("Could not create log file"); printThrowable(e, "Startup"); }
 
         try
@@ -159,31 +168,35 @@ public class NRODClient
     private static synchronized void print(String message, boolean toErr)
     {
         if (toErr)
-            System.err.println(message);
+            stdErr.println(message);
         else
-            System.out.println(message);
+            stdOut.println(message);
 
         filePrint(message);
     }
 
     private static synchronized void filePrint(String message)
     {
-        if (!lastLogDate.equals(sdfDate.format(new Date())))
+        Date logDate = new Date();
+        if (!lastLogDate.equals(sdfDate.format(logDate)))
         {
+            logStream.flush();
             logStream.close();
 
-            Date logDate = new Date(System.currentTimeMillis());
             lastLogDate = sdfDate.format(logDate);
 
-            logFile = new File(EASMStorageDir, "Logs" + File.separator + "NRODClient" + File.separator + sdfDate.format(logDate).replace("/", "-") + ".log");
+            logFile = new File(EASMStorageDir, "Logs" + File.separator + "NRODClient" + File.separator + lastLogDate.replace("/", "-") + ".log");
             logFile.getParentFile().mkdirs();
 
             try
             {
                 logFile.createNewFile();
-                logStream = new PrintStream(new FileOutputStream(logFile, logFile.length() > 0));
+                logStream = new PrintStream(new FileOutputStream(logFile, true));
+
+                System.setOut(logStream);
+                System.setErr(logStream);
             }
-            catch (IOException e) { printErr("Could not create next log file"); printThrowable(e, "Startup"); }
+            catch (IOException e) { printErr("Could not create log file"); printThrowable(e, "Logging"); }
         }
 
         logStream.println(message);

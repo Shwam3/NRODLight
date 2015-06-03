@@ -1,25 +1,19 @@
 package nrodclient.stomp.handlers;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.net.MalformedURLException;
 import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.net.URLConnection;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
@@ -45,7 +39,7 @@ public class RTPPMHandler implements Listener
     private String lastMessage = null;
     private long lastMessageTime = 0;
     private Date purgeDateTime = null;
-    public final static Map<String, Operator> operators = new HashMap<>();
+    public static final Map<String, Operator> operators = new HashMap<>();
 
     private static Listener instance = null;
     public static Listener getInstance()
@@ -83,7 +77,7 @@ public class RTPPMHandler implements Listener
         }
         catch (IOException e) { NRODClient.printThrowable(e, "RTPPM"); }
 
-        File saveFile = new File(NRODClient.EASMStorageDir, "RTPPM.save");
+        /*File saveFile = new File(NRODClient.EASMStorageDir, "RTPPM.save");
         if (saveFile.exists())
         {
             try (ObjectInputStream ois = new ObjectInputStream(new BufferedInputStream(new FileInputStream(saveFile))))
@@ -94,15 +88,42 @@ public class RTPPMHandler implements Listener
             }
             catch (ClassNotFoundException e) {}
             catch (IOException e) { NRODClient.printThrowable(e, "RTPPM"); }
+        }*/
+        File saveFile = new File(NRODClient.EASMStorageDir, "RTPPM.json");
+        if (saveFile.exists())
+        {
+            try (BufferedReader br = new BufferedReader(new FileReader(saveFile)))
+            {
+                String jsonString = "";
+
+                String line;
+                while ((line = br.readLine()) != null)
+                    jsonString += line;
+
+                NRODClient.stdOut.println(jsonString);
+                Map<String, Object> json = JSONParser.parseJSON("{" + jsonString + "}");
+
+                readData((Map<String, Map<String, Object>>) json.get("RTPPMData"));
+
+                List<String> operatorNames = new ArrayList<>(operators.keySet());
+                Collections.sort(operatorNames, String.CASE_INSENSITIVE_ORDER);
+                operatorNames.stream().forEachOrdered((operator) -> operators.get(operator).printPrettyString());
+
+                printRTPPM("Incident Messages:", false);
+                for (String incidentMessage : String.valueOf(json.get("IncidentMessages")).split("\\n"))
+                    printRTPPM("  " + incidentMessage.trim(), false);
+            }
+            catch (IOException e) { NRODClient.printThrowable(e, "RTPPM"); }
+            catch (Exception e) { NRODClient.printThrowable(e, "RTPPM"); }
         }
 
         Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("GMT"));
         int mins = calendar.get(Calendar.MINUTE);
-        calendar.add(Calendar.MINUTE, 10 - (mins % 10));
+        calendar.add(Calendar.MINUTE, 5 - (mins % 5));
         calendar.set(Calendar.SECOND, 30);
         calendar.set(Calendar.MILLISECOND, 500);
 
-        Executors.newScheduledThreadPool(1).scheduleAtFixedRate(() -> { uploadHTML(); }, calendar.getTimeInMillis() - System.currentTimeMillis(), 600000, TimeUnit.MILLISECONDS);
+        Executors.newScheduledThreadPool(1).scheduleAtFixedRate(() -> uploadHTML(), calendar.getTimeInMillis() - System.currentTimeMillis(), 300000, TimeUnit.MILLISECONDS);
     }
 
     @Override
@@ -115,21 +136,19 @@ public class RTPPMHandler implements Listener
 
         Date timestamp = new Date(Long.parseLong(String.valueOf(ppmMap.get("timestamp"))));
 
-        operators.clear();
-
         if (timestamp.after(purgeDateTime))
         {
-            logFinalPPMs();
-
             Calendar purgeDateTimeCal = Calendar.getInstance();
             purgeDateTimeCal.setTime(timestamp);
             purgeDateTimeCal.set(Calendar.HOUR_OF_DAY, 2);
             purgeDateTimeCal.set(Calendar.MINUTE, 0);
-            purgeDateTimeCal.set(Calendar.SECOND, 0);
+            purgeDateTimeCal.set(Calendar.SECOND, 30);
             purgeDateTimeCal.set(Calendar.MILLISECOND, 0);
             if (purgeDateTimeCal.getTime().before(timestamp))
                 purgeDateTimeCal.add(Calendar.DAY_OF_YEAR, 1);
             purgeDateTime = purgeDateTimeCal.getTime();
+
+            logFinalPPMs();
 
             operators.clear();
         }
@@ -154,18 +173,23 @@ public class RTPPMHandler implements Listener
                 if (map.get("OprServiceGrp") instanceof Map)
                     operator.putService(String.valueOf(((Map) map.get("OprServiceGrp")).get("name")), (Map<String, Object>) map.get("OprServiceGrp"));
                 else if (map.get("OprServiceGrp") instanceof List)
-                    for (Object serviceObj : (List) map.get("OprServiceGrp"))
-                        operator.putService(String.valueOf(((Map) serviceObj).get("name")), ((Map) serviceObj));
+                    ((List) map.get("OprServiceGrp")).stream()
+                            .forEach((serviceObj) -> operator.putService(String.valueOf(((Map) serviceObj).get("name")), ((Map) serviceObj))                );
             }
         }
         catch (Exception e) { NRODClient.printThrowable(e, "RTPPM"); }
+
+        lastMessage = message;
+        lastMessageTime = System.currentTimeMillis();
+        StompConnectionHandler.lastMessageTimeGeneral = lastMessageTime;
+        StompConnectionHandler.ack(headers.get("ack"));
 
         Map<String, Map<String, Object>> ppmData = new HashMap<>(getPPMData());
 
         //<editor-fold defaultstate="collapsed" desc="Print out">
         List<String> operatorNames = new ArrayList<>(operators.keySet());
         Collections.sort(operatorNames, String.CASE_INSENSITIVE_ORDER);
-        operatorNames.stream().forEach((operator) -> { operators.get(operator).printPrettyString(); });
+        operatorNames.stream().forEachOrdered((operator) -> operators.get(operator).printPrettyString());
 
         printRTPPM("Incident Messages:", false);
         for (String incidentMessage : incidentMessages.split("\\n"))
@@ -173,7 +197,7 @@ public class RTPPMHandler implements Listener
         //</editor-fold>
 
         //<editor-fold defaultstate="collapsed" desc="Obj. Out Stream file">
-        try
+        /*try
         {
             File saveFile = new File(NRODClient.EASMStorageDir, "RTPPM.save");
             if (!saveFile.exists())
@@ -189,7 +213,7 @@ public class RTPPMHandler implements Listener
 
             printRTPPM("Saved oos file (" + (saveFile.length() / 1024L) + "kb)", false);
         }
-        catch (IOException e) { NRODClient.printThrowable(e, "RTPPM"); }
+        catch (IOException e) { NRODClient.printThrowable(e, "RTPPM"); }*/
         //</editor-fold>
 
         //<editor-fold defaultstate="collapsed" desc="JSON file">
@@ -265,10 +289,8 @@ public class RTPPMHandler implements Listener
             if (incidentMessages == null || incidentMessages.trim().equals("null") || incidentMessages.trim().equals(""))
                 incidentMessages = "No messages";
 
-            sb.append(",\"IncidentMessages\":\"").append(incidentMessages)
-                    .append("\",\"timestamp\":").append(timestamp.getTime())
-                    /*.append(",\"lastMessage\":\"").append(message)*/
-                    .append('"');
+            sb.append(",\"IncidentMessages\":\"").append(incidentMessages).append("\",");
+            sb.append("\"timestamp\":").append(timestamp.getTime());
 
             try (BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(saveFile))))
             {
@@ -295,7 +317,7 @@ public class RTPPMHandler implements Listener
         html.append("  </head>\r\n");
         html.append("  <body>\r\n");
         html.append("    <div class=\"ppmMain\">\r\n");
-        html.append("    <p id=\"title\"><abbr title=\"Real-Time (at 15 min intervals) Public Performance Measure\">Real-Time PPM</abbr>&nbsp;<span class=\"small\">").append(new SimpleDateFormat("(dd/MM HH:mm:ss)").format(timestamp)).append("</span></p>\r\n");
+        html.append("    <p id=\"title\"><abbr title=\"Real-Time (at 15 min intervals) Public Performance Measure\">Real-Time PPM</abbr>&nbsp;<span class=\"small\">(").append(NRODClient.sdfDateTimeShort.format(timestamp)).append(")</span></p>\r\n");
         //html.append("    <p id=\"title\"><img id=\"logo\" src=\"/logo.png\"><abbr title=\"Real-Time (15 min intervals) Public Performance Measure\">Real-Time PPM</abbr>&nbsp;<span class=\"small\">").append(new SimpleDateFormat("(dd/MM HH:mm)").format(new Date())).append("</span></p>\r\n");
 
         String[] keys = operators.keySet().toArray(new String[0]);
@@ -335,11 +357,6 @@ public class RTPPMHandler implements Listener
         }
         catch (IOException e) { NRODClient.printThrowable(e, "RTPPM HTML"); }
         //</editor-fold>
-
-        lastMessage = message;
-        lastMessageTime = System.currentTimeMillis();
-        StompConnectionHandler.lastMessageTimeGeneral = lastMessageTime;
-        StompConnectionHandler.ack(headers.get("ack"));
     }
 
     private void logFinalPPMs()
@@ -365,9 +382,11 @@ public class RTPPMHandler implements Listener
             }
             catch (IOException e) { NRODClient.printThrowable(e, "RTPPM"); }
 
-            try (BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(file))))
+            try (BufferedWriter bw = new BufferedWriter(new FileWriter(file, true)))
             {
                 bw.write(lastMessage);
+                bw.write("\r\n");
+                bw.flush();
             }
         }
         catch (IOException e) { NRODClient.printThrowable(e, "RTPPM"); }
@@ -377,7 +396,6 @@ public class RTPPMHandler implements Listener
     {
         public  final String NAME;
         public  final int    CODE;
-      //private       Map<String, Map<String, String>> ppmMap     = new HashMap<>();
         private       Map<String, Map<String, Object>> serviceMap = new HashMap<>();
         private       String keySymbol = "";
 
@@ -386,16 +404,6 @@ public class RTPPMHandler implements Listener
             NAME = name;
             CODE = code;
         }
-
-        /*public void addPPMData(Map<String, Map<String, String>> map)
-        {
-            ppmMap.putAll(map);
-        }
-
-        public Map<String, String> getService(String serviceName)
-        {
-            return ppmMap.get(serviceName);
-        }*/
 
         public void setKeySymbol(String keySymbol) { this.keySymbol = keySymbol; }
 
@@ -407,25 +415,26 @@ public class RTPPMHandler implements Listener
             if (serviceMap.containsKey(serviceName))
                 trimmedServiceMap = serviceMap.get(serviceName);
 
-            keySymbol = String.valueOf(fullIndividualServiceMap.get("keySymbol"));
-            keySymbol = keySymbol.replace("null", " ");
+            keySymbol = String.valueOf(fullIndividualServiceMap.getOrDefault("keySymbol", ""));
 
             int casl = Integer.parseInt((String) fullIndividualServiceMap.get("CancelVeryLate"));
             int late = Integer.parseInt((String) fullIndividualServiceMap.get("Late")) - casl;
 
-            trimmedServiceMap.put("CancelVeryLate", (String) fullIndividualServiceMap.get("CancelVeryLate"));
+            trimmedServiceMap.put("CancelVeryLate", Integer.toString(casl));
             trimmedServiceMap.put("Late",           Integer.toString(late));
             trimmedServiceMap.put("OnTime",         (String) fullIndividualServiceMap.get("OnTime"));
             trimmedServiceMap.put("Total",          (String) fullIndividualServiceMap.get("Total"));
             trimmedServiceMap.put("PPM",            (Map)    fullIndividualServiceMap.get("PPM"));
             trimmedServiceMap.put("RollingPPM",     (Map)    fullIndividualServiceMap.get("RollingPPM"));
+            trimmedServiceMap.put("Timeband",       (String) fullIndividualServiceMap.getOrDefault("timeband", keySymbol.replace("*", "10").replace("^", "5")));
+            trimmedServiceMap.put("SectorCode",     (String) fullIndividualServiceMap.get("sectorCode"));
 
             serviceMap.put(serviceName, trimmedServiceMap);
         }
 
         public void printPrettyString()
         {
-            printRTPPM(NAME + " (" + CODE + ")", false);
+            printRTPPM(NAME + (CODE > 0 ? " (" + CODE + ")" : ""), false);
 
             String[] serviceNames = serviceMap.keySet().toArray(new String[0]);
             Arrays.sort(serviceNames, String.CASE_INSENSITIVE_ORDER);
@@ -482,11 +491,13 @@ public class RTPPMHandler implements Listener
                 String ppm = String.valueOf(((Map) map.get("PPM")).get("text"));
                 if (!ppm.equals("-1"))
                     sb.append(lengthen(ppm + "%, ", 6));
-                else
+                else if (!map.get("Total").equals("0"))
                 {
                     try { sb.append(lengthen((100 * ((Integer) Integer.parseInt((String) map.get("OnTime")) / Integer.parseInt((String) map.get("Total")))) + "?, ", 6)); }
                     catch (NumberFormatException e) { sb.append("N/A,  ");  }
                 }
+                else
+                    sb.append("0?,   ");
 
                 sb.append(lengthen(String.valueOf(map.get("Total"))          + ",  ", 7));
                 sb.append(lengthen(String.valueOf(map.get("OnTime"))         + ", ",  6));
@@ -554,7 +565,7 @@ public class RTPPMHandler implements Listener
         {
             StringBuilder sb = new StringBuilder();
 
-            sb.append("    <h3 class=\"ppmTableTitle\">").append(NAME).append(" (").append(CODE).append(")").append(keySymbol.trim().replace("*", " (10 mins)").replace("^", " (5 mins)")).append("<br/></h3>");
+            sb.append("    <h3 class=\"ppmTableTitle\">").append(NAME).append(CODE > 0 ? " ("+CODE+")" : "").append("<br/></h3>");
             sb.append("    <table class=\"ppmTable\" sortable>");
             sb.append("      <tr>");
             sb.append("        <th class=\"ppmTable\" rowspan=\"2\">Service Name</th>");
@@ -718,6 +729,69 @@ public class RTPPMHandler implements Listener
         }
     }
 
+    public static enum OperatorType
+    {
+        LONG_DISTANCE  ("*", "Long distance"),
+        SHORT_DISTANCE ("^", "Short distance"),
+        MIXED          ("",  "Mixed distances");
+
+        private final String keySymbol;
+        private final String description;
+
+        private OperatorType(String keySymbol, String description)
+        {
+            this.keySymbol   = keySymbol;
+            this.description = description;
+        }
+
+        public String getKeySymbol() { return keySymbol; }
+        public String getDescription() { return description; }
+
+        public static OperatorType getType(Object type)
+        {
+            if (type instanceof OperatorType)
+                return (OperatorType) type;
+            else
+                for (OperatorType typeEnum : values())
+                    if (typeEnum.equals(type) || type.equals(typeEnum.getDescription()) || type.equals(typeEnum.getKeySymbol()))
+                        return typeEnum;
+
+            return null;
+        }
+    }
+
+    public static enum SectorType
+    {
+        LSE ("LSE", "London and South East"),
+        LD  ("LD",  "Long Distance"),
+        REG ("REG", "Regional"),
+        SCO ("SCO", "Scotland");
+
+        private final String sectorCode;
+        private final String description;
+
+        private SectorType(String sectorCode, String description)
+        {
+            this.sectorCode  = sectorCode;
+            this.description = description;
+        }
+
+        public String getSectorCode()  { return sectorCode; }
+        public String getDescription() { return description; }
+
+        public static SectorType getType(Object type)
+        {
+            if (type instanceof SectorType)
+                return (SectorType) type;
+            else
+                for (SectorType typeEnum : values())
+                    if (typeEnum.equals(type) || type.equals(typeEnum.getDescription()) || type.equals(typeEnum.getSectorCode()))
+                        return typeEnum;
+
+            return null;
+        }
+    }
+
     public static Map<String, Map<String, Object>> getPPMData()
     {
         Map<String, Map<String, Object>> map = new HashMap<>();
@@ -732,10 +806,11 @@ public class RTPPMHandler implements Listener
         dataMap.entrySet().stream().forEach((pairs) ->
         {
             if (!operators.containsKey(pairs.getKey()))
-                operators.put(pairs.getKey(), new Operator((String) pairs.getValue().get("name"), (int) pairs.getValue().get("code")));
+                operators.put(pairs.getKey(), new Operator((String) pairs.getValue().get("name"), (int) ((long) pairs.getValue().get("code"))));
 
             operators.get(pairs.getKey()).readMap(pairs.getValue());
         });
+
     }
 
     public static void uploadHTML()

@@ -97,7 +97,7 @@ public class StompConnectionHandler
         }
         else
         {
-            printStomp("Could not connect to network rails servers", true);
+            printStomp("Could not connect to network rail's servers", true);
             return false;
         }
 
@@ -119,15 +119,13 @@ public class StompConnectionHandler
     public static void disconnect()
     {
         if (client != null && isConnected() && !isClosed())
-        {
             client.disconnect();
 
-            subscribedRTPPM = false;
-            subscribedMVT   = false;
-            subscribedVSTP  = false;
-            subscribedTSR   = false;
-            subscribedTD    = false;
-        }
+        subscribedRTPPM = false;
+        subscribedMVT   = false;
+        subscribedVSTP  = false;
+        subscribedTSR   = false;
+        subscribedTD    = false;
     }
 
     public static boolean isConnected()
@@ -192,23 +190,15 @@ public class StompConnectionHandler
         }
 
         executor = Executors.newScheduledThreadPool(1);
-        AtomicInteger waitGeneral = new AtomicInteger(0);
-      /*AtomicInteger waitMVT     = new AtomicInteger(0);
-        AtomicInteger waitRTPPM   = new AtomicInteger(0);
-        AtomicInteger waitVSTP    = new AtomicInteger(0);
-        AtomicInteger waitTSR     = new AtomicInteger(0);*/
-        AtomicInteger timeoutWaitGeneral = new AtomicInteger(0);
-      /*AtomicInteger timeoutWaitMVT     = new AtomicInteger(0);
-        AtomicInteger timeoutWaitRTPPM   = new AtomicInteger(0);
-        AtomicInteger timeoutWaitVSTP    = new AtomicInteger(0);
-        AtomicInteger timeoutWaitTSR     = new AtomicInteger(0);*/
+        AtomicInteger wait = new AtomicInteger(0);
+        AtomicInteger timeoutWait = new AtomicInteger(0);
 
         // General timeout
         executor.scheduleWithFixedDelay(() ->
         {
-            if (waitGeneral.get() >= timeoutWaitGeneral.get())
+            if (wait.get() >= timeoutWait.get())
             {
-                waitGeneral.set(0);
+                wait.set(0);
 
                 long time = System.currentTimeMillis() - lastMessageTimeGeneral;
 
@@ -216,14 +206,14 @@ public class StompConnectionHandler
 
                 if (isTimedOut() || !isConnected())
                 {
-                    timeoutWaitGeneral.set(Math.min(maxTimeoutWait, timeoutWaitGeneral.get() + 10));
+                    timeoutWait.set(Math.min(maxTimeoutWait, timeoutWait.get() + 10));
 
-                    printStomp((isTimedOut() ? "Timed Out" : "") + (isTimedOut() && isClosed() ? ", " : "") + (isClosed() ? "Closed" : "") + ((isTimedOut() || isClosed()) && !isConnected() ? " & " : "") + (!isConnected() ? "Disconnected" : "") + " (" + timeoutWaitGeneral.get() + "s)", true);
+                    printStomp((isTimedOut() ? "Timed Out" : "") + (isTimedOut() && isClosed() ? ", " : "") + (isClosed() ? "Closed" : "") + ((isTimedOut() || isClosed()) && !isConnected() ? " & " : "") + (!isConnected() ? "Disconnected" : "") + " (" + timeoutWait.get() + "s)", true);
 
                     try
                     {
                         if (client != null)
-                            client.disconnect();
+                            disconnect();
 
                         connect();
                     }
@@ -233,7 +223,7 @@ public class StompConnectionHandler
                 }
                 else
                 {
-                    timeoutWaitGeneral.set(10);
+                    timeoutWait.set(10);
 
                     long timeMVT   = MVTHandler.getInstance().getTimeout();
                     long timeRTPPM = RTPPMHandler.getInstance().getTimeout();
@@ -277,57 +267,75 @@ public class StompConnectionHandler
                                 (TDHandler.getInstance().getTimeoutThreshold() / 1000)),
                             timedOutTD);
 
-                    if (timedOutMVT)
+                    if (timedOutMVT || timedOutRTPPM || timedOutVSTP || timedOutVSTP || timedOutTD)
                     {
-                        toggleMVT();
+                        if (timeMVT >= MVTHandler.getInstance().getTimeoutThreshold()*2 ||
+                                timeRTPPM >= RTPPMHandler.getInstance().getTimeoutThreshold()*2 ||
+                                timeVSTP  >= VSTPHandler.getInstance().getTimeoutThreshold()*2 ||
+                                timeTSR   >= TSRHandler.getInstance().getTimeoutThreshold()*2 ||
+                                timeTD    >= TDHandler.getInstance().getTimeoutThreshold()*2)
+                        {
+                            if (client != null)
+                                disconnect();
 
-                        try { Thread.sleep(50); }
-                        catch(InterruptedException e) {}
-
-                        toggleMVT();
+                            wrappedConnect();
+                        }
                     }
-                    if (timedOutRTPPM)
+                    else
                     {
-                        toggleRTPPM();
+                        if (timedOutMVT)
+                        {
+                            toggleMVT();
 
-                        try { Thread.sleep(50); }
-                        catch(InterruptedException e) {}
+                            try { Thread.sleep(50); }
+                            catch(InterruptedException e) {}
 
-                        toggleRTPPM();
+                            toggleMVT();
+                        }
+                        if (timedOutRTPPM)
+                        {
+                            toggleRTPPM();
+
+                            try { Thread.sleep(50); }
+                            catch(InterruptedException e) {}
+
+                            toggleRTPPM();
+                        }
+                        if (timedOutVSTP)
+                        {
+                            toggleVSTP();
+
+                            try { Thread.sleep(50); }
+                            catch(InterruptedException e) {}
+
+                            toggleVSTP();
+                        }
+                        if (timedOutTSR)
+                        {
+                            toggleTSR();
+
+                            try { Thread.sleep(50); }
+                            catch(InterruptedException e) {}
+
+                            toggleTSR();
+                        }
+                        if (timedOutTD)
+                        {
+                            toggleTD();
+
+                            try { Thread.sleep(50); }
+                            catch(InterruptedException e) {}
+
+                            toggleTD();
+                        }
                     }
-                    if (timedOutVSTP)
-                    {
-                        toggleVSTP();
 
-                        try { Thread.sleep(50); }
-                        catch(InterruptedException e) {}
-
-                        toggleVSTP();
-                    }
-                    if (timedOutTSR)
-                    {
-                        toggleTSR();
-
-                        try { Thread.sleep(50); }
-                        catch(InterruptedException e) {}
-
-                        toggleTSR();
-                    }
-                    if (timedOutTD)
-                    {
-                        toggleTD();
-
-                        try { Thread.sleep(50); }
-                        catch(InterruptedException e) {}
-
-                        toggleTD();
-                    }
                     if (!timedOutMVT && !timedOutRTPPM && !timedOutVSTP && !timedOutTSR)
                         printStomp("No problems", false);
                 }
             }
             else
-                waitGeneral.addAndGet(10);
+                wait.addAndGet(10);
         }, 10, 10, TimeUnit.SECONDS);
 
         // MVT

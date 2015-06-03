@@ -52,7 +52,7 @@ public class TSRHandler implements Listener
 
         try
         {
-            File file = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "TSR" + File.separator + NRODClient.sdfDate.format(new Date(Long.parseLong(String.valueOf(message.get("timestamp"))))).replace("/", "-") + ".json");
+            File file = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "TSR" + File.separator + NRODClient.sdfDate.format(new Date(/*Long.parseLong(String.valueOf(message.get("timestamp")))*/)).replace("/", "-") + ".json");
             file.getParentFile().mkdirs();
             file.createNewFile();
 
