@@ -309,7 +309,7 @@ public class RTPPMHandler implements Listener
         html.append("    <title>Real-Time PPM</title>\r\n");
         html.append("    <meta charset=\"utf-8\">\r\n");
         html.append("    <meta content=\"width=device-width,initial-scale=1.0\" name=\"viewport\">\r\n");
-        html.append("    <meta http-equiv=\"refresh\" content=\"600\">\r\n");
+        html.append("    <meta http-equiv=\"refresh\" content=\"300\">\r\n");
         html.append("    <meta name=\"description\" content=\"Real-Time PPM\">\r\n");
         html.append("    <meta name=\"author\" content=\"Cameron Bird\">\r\n");
         html.append("    <link rel=\"icon\" type=\"image/x-icon\" href=\"/favicon.ico\">\r\n");
@@ -317,8 +317,9 @@ public class RTPPMHandler implements Listener
         html.append("  </head>\r\n");
         html.append("  <body>\r\n");
         html.append("    <div class=\"ppmMain\">\r\n");
-        html.append("    <p id=\"title\"><abbr title=\"Real-Time (at 15 min intervals) Public Performance Measure\">Real-Time PPM</abbr>&nbsp;<span class=\"small\">(").append(NRODClient.sdfDateTimeShort.format(timestamp)).append(")</span></p>\r\n");
-        //html.append("    <p id=\"title\"><img id=\"logo\" src=\"/logo.png\"><abbr title=\"Real-Time (15 min intervals) Public Performance Measure\">Real-Time PPM</abbr>&nbsp;<span class=\"small\">").append(new SimpleDateFormat("(dd/MM HH:mm)").format(new Date())).append("</span></p>\r\n");
+        html.append("    <p id=\"title\"><abbr title=\"Real-Time (at 15 min intervals) Public Performance Measure\">Real-Time PPM</abbr>&nbsp;<span class=\"small\">(")
+                .append(NRODClient.sdfDateTimeShort.format(new Date(timestamp.getTime() - 3600000))) // Time fix
+                .append(")</span></p>\r\n");
 
         String[] keys = operators.keySet().toArray(new String[0]);
         Arrays.sort(keys, String.CASE_INSENSITIVE_ORDER);
@@ -333,7 +334,7 @@ public class RTPPMHandler implements Listener
 
         html.append("      </div>");
         html.append("    </div>");
-        html.append("    <script type=\"text/javascript\">setInterval(function() { document.reload(true) }, 600000);</script>");
+        html.append("    <script type=\"text/javascript\">setInterval(function() { document.reload(true) }, 300000);</script>");
         html.append("  </body>");
         html.append("</html>");
 

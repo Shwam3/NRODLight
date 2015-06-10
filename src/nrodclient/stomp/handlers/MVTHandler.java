@@ -152,7 +152,7 @@ public class MVTHandler implements Listener
         {
             logStream.close();
 
-            Date logDate = new Date(System.currentTimeMillis());
+            Date logDate = new Date();
             lastLogDate = NRODClient.sdfDate.format(logDate);
 
             logFile = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "Movement" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".log");
