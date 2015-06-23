@@ -242,6 +242,20 @@ public class TDHandler implements Listener
                 logStream = new PrintWriter(new BufferedWriter(new FileWriter(logFile, true)), true);
             }
             catch (IOException e) { NRODClient.printThrowable(e, "TD"); }
+
+            StringBuilder sb = new StringBuilder().append("{\"TDData\":{");
+            DataMap.entrySet().stream().filter(p -> p.getValue() != null).forEach(p -> sb.append("\r\n\"").append(p.getKey()).append("\":\"").append(p.getValue()).append("\","));
+
+            if (sb.charAt(sb.length()-1) == ',')
+                sb.deleteCharAt(sb.length()-1);
+            sb.append("\r\n}}");
+
+            File fileReplaySave = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "ReplaySaves" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".json");
+            try (BufferedWriter bw = new BufferedWriter(new FileWriter(fileReplaySave)))
+            {
+                bw.write(sb.toString());
+            }
+            catch (IOException e) { NRODClient.printThrowable(e, "TD"); }
         }
 
         logStream.println("[".concat(NRODClient.sdfDateTime.format(new Date(timestamp))).concat("] ").concat(message));
