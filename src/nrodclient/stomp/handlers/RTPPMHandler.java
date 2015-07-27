@@ -229,20 +229,19 @@ public class RTPPMHandler implements Listener
             StringBuilder sb = new StringBuilder();
             sb.append("\"RTPPMData\":{");
 
-            for (Map.Entry<String, Map<String, Object>> operator : ppmData.entrySet())
+            ppmData.entrySet().stream().forEach((operator) ->
             {
                 StringBuilder sb2 = new StringBuilder();
-                for (Map.Entry<String, Object> operatorInfo : operator.getValue().entrySet())
+                operator.getValue().entrySet().stream().forEach(operatorInfo ->
                 {
                     sb2.append('"').append(operatorInfo.getKey()).append("\":");
-
                     if (operatorInfo.getValue() instanceof Map)
                     {
                         sb2.append('{');
-                        for (Map.Entry<String, Map<String, Object>> serviceRoute : ((Map<String, Map<String, Object>>) operatorInfo.getValue()).entrySet())
+                        ((Map<String, Map<String, Object>>) operatorInfo.getValue()).entrySet().stream().forEach((serviceRoute) ->
                         {
                             sb2.append('"').append(serviceRoute.getKey()).append('"').append(':').append('{');
-                            for (Map.Entry<String, Object> breakdown : serviceRoute.getValue().entrySet())
+                            serviceRoute.getValue().entrySet().stream().forEach((breakdown) ->
                             {
                                 sb2.append('"').append(breakdown.getKey()).append('"').append(':');
                                 if (breakdown.getValue() instanceof Integer)
@@ -250,11 +249,11 @@ public class RTPPMHandler implements Listener
                                 else if (breakdown.getValue() instanceof Map)
                                 {
                                     sb2.append('{');
-                                    for (Map.Entry<String, String> ppmDisplayInfo : ((Map<String, String>) breakdown.getValue()).entrySet())
+                                    ((Map<String, String>) breakdown.getValue()).entrySet().stream().forEach((ppmDisplayInfo) ->
                                     {
                                         sb2.append('"').append(ppmDisplayInfo.getKey()).append('"').append(':');
                                         sb2.append('"').append(ppmDisplayInfo.getValue()).append('"').append(',');
-                                    }
+                                    });
                                     if (sb2.charAt(sb2.length()-1) == ',')
                                         sb2.deleteCharAt(sb2.length()-1);
                                     sb2.append('}');
@@ -263,11 +262,11 @@ public class RTPPMHandler implements Listener
                                     sb2.append('"').append(breakdown.getValue()).append('"');
 
                                 sb2.append(',');
-                            }
+                            });
                             if (sb2.charAt(sb2.length()-1) == ',')
                                 sb2.deleteCharAt(sb2.length()-1);
                             sb2.append('}').append(',');
-                        }
+                        });
 
                         if (sb2.charAt(sb2.length()-1) == ',')
                             sb2.deleteCharAt(sb2.length()-1);
@@ -279,14 +278,14 @@ public class RTPPMHandler implements Listener
                         sb2.append(operatorInfo.getValue());
 
                     sb2.append(',');
-                }
+                });
                 sb.append('"').append(operator.getKey()).append("\":{").append(sb2.toString().substring(0, sb2.length()-1)).append("},");
-            }
+            });
             if (sb.charAt(sb.length()-1) == ',')
                 sb.deleteCharAt(sb.length()-1);
             sb.append('}');
 
-            if (incidentMessages == null || incidentMessages.trim().equals("null") || incidentMessages.trim().equals(""))
+            if (incidentMessages.trim().equals("null") || incidentMessages.trim().equals(""))
                 incidentMessages = "No messages";
 
             sb.append(",\"IncidentMessages\":\"").append(incidentMessages).append("\",");
@@ -464,8 +463,8 @@ public class RTPPMHandler implements Listener
                         sb.append(lengthen(ppm + "%, ", 6));
                     else
                     {
-                        try { sb.append(lengthen((100 * ((Integer) Integer.parseInt((String) map.get("OnTime")) / Integer.parseInt((String) map.get("Total")))) + "?, ", 6)); }
-                        catch (NumberFormatException e) { sb.append("N/A,  ");  }
+                        try { sb.append(lengthen((map.get("Total").equals("0") ? "0" : (100 * ((Integer) Integer.parseInt((String) map.get("OnTime")) / Integer.parseInt((String) map.get("Total"))))) + "?, ", 6)); }
+                        catch (NumberFormatException | ArithmeticException e) { sb.append("N/A,  ");  }
                     }
 
                     sb.append(lengthen(String.valueOf(map.get("Total"))          + ",  ", 7));
@@ -495,7 +494,7 @@ public class RTPPMHandler implements Listener
                 else if (!map.get("Total").equals("0"))
                 {
                     try { sb.append(lengthen((100 * ((Integer) Integer.parseInt((String) map.get("OnTime")) / Integer.parseInt((String) map.get("Total")))) + "?, ", 6)); }
-                    catch (NumberFormatException e) { sb.append("N/A,  ");  }
+                    catch (NumberFormatException | ArithmeticException e) { sb.append("N/A,  ");  }
                 }
                 else
                     sb.append("0?,   ");
@@ -606,7 +605,7 @@ public class RTPPMHandler implements Listener
                     {
                         sb.append("        <td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("PPM")).get("rag")))).append("\">");
                         try { sb.append("<abbr title=\"guess\">").append(100 * ((Integer) Integer.parseInt((String) map.get("OnTime")) / Integer.parseInt((String) map.get("Total")))).append("%</abbr>"); }
-                        catch (NumberFormatException e) { sb.append("N/A"); }
+                        catch (NumberFormatException | ArithmeticException e) { sb.append("N/A"); }
                         sb.append("</td>");
                     }
 
@@ -730,7 +729,7 @@ public class RTPPMHandler implements Listener
         }
     }
 
-    public static enum OperatorType
+    /*public static enum OperatorType
     {
         LONG_DISTANCE  ("*", "Long distance"),
         SHORT_DISTANCE ("^", "Short distance"),
@@ -791,7 +790,7 @@ public class RTPPMHandler implements Listener
 
             return null;
         }
-    }
+    }*/
 
     public static Map<String, Map<String, Object>> getPPMData()
     {
@@ -811,7 +810,6 @@ public class RTPPMHandler implements Listener
 
             operators.get(pairs.getKey()).readMap(pairs.getValue());
         });
-
     }
 
     public static void uploadHTML()

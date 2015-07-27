@@ -7,6 +7,7 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -21,7 +22,7 @@ public class TDHandler implements Listener
     private static PrintWriter logStream;
     private static File        logFile;
     private static String      lastLogDate = "";
-    private long lastMessageTime = 0;
+    private long               lastMessageTime = 0;
 
     private static boolean isSaving = false;
 
@@ -66,7 +67,7 @@ public class TDHandler implements Listener
         return instance;
     }
 
-    public  static Map<String, String> DataMap = new HashMap<>();
+    public static Map<String, String> DataMap = new HashMap<>();
 
     @Override
     public void message(Map<String, String> headers, String body)
@@ -76,6 +77,8 @@ public class TDHandler implements Listener
         //<editor-fold defaultstate="collapsed" desc="TD Data">
         List<Map<String, Map<String, String>>> messageList = (List<Map<String, Map<String, String>>>) JSONParser.parseJSON("{\"TDMessage\":" + body + "}").get("TDMessage");
         final String areas = "LS SE SI CC CA EN WG SO SX";
+
+        final Map<String, String> HistoryMap = new HashMap<>();
 
         for (Map<String, Map<String, String>> map : messageList)
         {
@@ -92,6 +95,7 @@ public class TDHandler implements Listener
                 switch (msgType.toUpperCase())
                 {
                     case "CA_MSG":
+                        HistoryMap.put(indvMsg.get("area_id") + indvMsg.get("to"), String.format("[%s] Move %s", NRODClient.sdfDateTimeShort.format(new Date(Long.parseLong(indvMsg.get("time")))), indvMsg.get("descr")));
                         DataMap.put(indvMsg.get("area_id") + indvMsg.get("from"), "");
                         DataMap.put(indvMsg.get("area_id") + indvMsg.get("to"),   indvMsg.get("descr"));
 
@@ -103,6 +107,7 @@ public class TDHandler implements Listener
                             Long.parseLong(indvMsg.get("time")));
                         break;
                     case "CB_MSG":
+                        HistoryMap.put(indvMsg.get("area_id") + indvMsg.get("from"), String.format("[%s] Cancel %s", NRODClient.sdfDateTimeShort.format(new Date(Long.parseLong(indvMsg.get("time")))), indvMsg.get("descr")));
                         DataMap.put(indvMsg.get("area_id") + indvMsg.get("from"), "");
 
                         printTD(String.format("Cancel %s from %s",
@@ -112,6 +117,7 @@ public class TDHandler implements Listener
                             Long.parseLong(indvMsg.get("time")));
                         break;
                     case "CC_MSG":
+                        HistoryMap.put(indvMsg.get("area_id") + indvMsg.get("to"), String.format("[%s] Interpose %s", NRODClient.sdfDateTimeShort.format(new Date(Long.parseLong(indvMsg.get("time")))), indvMsg.get("descr")));
                         DataMap.put(indvMsg.get("area_id") + indvMsg.get("to"), indvMsg.get("decsr"));
 
                         printTD(String.format("Interpose %s to %s",
@@ -140,6 +146,7 @@ public class TDHandler implements Listener
                                         false,
                                         Long.parseLong(indvMsg.get("time")));
 
+                                HistoryMap.put(address, String.format("[%s] Change to %s", NRODClient.sdfDateTimeShort.format(new Date(Long.parseLong(indvMsg.get("time")))), data[i]));
                                 DataMap.put(address, String.valueOf(data[i]));
                             }
                         }
@@ -163,13 +170,39 @@ public class TDHandler implements Listener
                             addrStart + (addrEnd.equals("0") ? "3" : addrEnd.equals("4") ? "7" : addrEnd.equals("8") ? "B" : "F")};
 
                         for (int i = 0; i < data.length; i++)
+                        {
                             DataMap.put(addresses[i], Integer.toString(data[i]));
+                            HistoryMap.put(addresses[i], String.format("[%s] Change to %s", NRODClient.sdfDateTimeShort.format(new Date(Long.parseLong(indvMsg.get("time")))), data[i]));
+                        }
                         break;
                     }
                 }
             }
             catch (Exception e) { NRODClient.printThrowable(e, "TD"); }
         }
+
+        SimpleDateFormat fileSDF = new SimpleDateFormat("YYYY" + File.separator + "MM" + File.separator + "dd");
+        File baseFolder = new File(NRODClient.EASMStorageDir, "TDData" + File.separator + fileSDF.format(new Date(Long.parseLong(headers.get("timestamp")))) + File.separator);
+        if (!baseFolder.exists())
+            baseFolder.mkdirs();
+
+        HistoryMap.entrySet().parallelStream().forEach(pairs ->
+        {
+            try
+            {
+                File historyFile = new File(baseFolder, pairs.getKey().replace(":", "-") + ".txt");
+                if (!historyFile.exists())
+                    historyFile.createNewFile();
+
+                try (BufferedWriter bw = new BufferedWriter(new FileWriter(historyFile, true)))
+                {
+                    bw.write(pairs.getValue());
+                    bw.write("\r\n");
+                }
+                catch (IOException e) { NRODClient.printThrowable(e, "TDDataSave-Write"); }
+            }
+            catch (IOException e) { NRODClient.printThrowable(e, "TDDataSave-General"); }
+        });
         //</editor-fold>
 
         //<editor-fold defaultstate="collapsed" desc="Save File">
