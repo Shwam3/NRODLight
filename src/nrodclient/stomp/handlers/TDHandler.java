@@ -50,11 +50,13 @@ public class TDHandler implements Listener
             }
             catch (IOException e) { NRODClient.printThrowable(e, "TD"); }
 
-            Map<String, Object> json = (Map<String, Object>) JSONParser.parseJSON(jsonString).get("TDData");
+            try
+            {
+                Map<String, Object> json = (Map<String, Object>) JSONParser.parseJSON(jsonString).get("TDData");
 
-            json.entrySet().stream().forEach(p ->
-                DataMap.put(p.getKey(), (String) p.getValue())
-            );
+                json.entrySet().stream().forEach(p -> DataMap.put(p.getKey(), (String) p.getValue()));
+            }
+            catch (IllegalArgumentException e) { NRODClient.printThrowable(e, "TD"); }
         }
 
         lastMessageTime = System.currentTimeMillis();
@@ -76,7 +78,7 @@ public class TDHandler implements Listener
 
         //<editor-fold defaultstate="collapsed" desc="TD Data">
         List<Map<String, Map<String, String>>> messageList = (List<Map<String, Map<String, String>>>) JSONParser.parseJSON("{\"TDMessage\":" + body + "}").get("TDMessage");
-        final String areas = "LS SE SI CC CA EN WG SO SX";
+        //final String areas = "LS SE SI CC CA EN WG SO SX";
 
         final Map<String, String> HistoryMap = new HashMap<>();
 
@@ -87,8 +89,8 @@ public class TDHandler implements Listener
                 String msgType = map.keySet().toArray(new String[0])[0];
                 Map<String, String> indvMsg = map.get(msgType);
 
-                if (!areas.contains(indvMsg.get("area_id")))
-                    continue;
+                //if (!areas.contains(indvMsg.get("area_id")))
+                //    continue;
 
                 indvMsg.put("address", indvMsg.get("area_id") + indvMsg.get("address"));
 
@@ -217,18 +219,20 @@ public class TDHandler implements Listener
                 sb.deleteCharAt(sb.length()-1);
             sb.append("\r\n}}");
 
+            File TDDataFileNew = new File(TDDataFile.getAbsolutePath() + ".new");
             try
             {
-                if (TDDataFile.exists())
-                    TDDataFile.delete();
-                TDDataFile.getParentFile().mkdirs();
-                TDDataFile.createNewFile();
-                try (BufferedWriter bw = new BufferedWriter(new FileWriter(TDDataFile)))
+                TDDataFileNew.getParentFile().mkdirs();
+                TDDataFileNew.createNewFile();
+                try (BufferedWriter bw = new BufferedWriter(new FileWriter(TDDataFileNew)))
                 {
                     bw.write(sb.toString());
                 }
                 catch (IOException e) { NRODClient.printThrowable(e, "TD"); }
 
+                if (TDDataFile.exists())
+                    TDDataFile.delete();
+                TDDataFileNew.renameTo(TDDataFile);
             }
             catch (IOException e) { NRODClient.printThrowable(e, "TD"); }
 

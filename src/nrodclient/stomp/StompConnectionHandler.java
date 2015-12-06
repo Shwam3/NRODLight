@@ -11,7 +11,6 @@ import java.util.Properties;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import javax.security.auth.login.LoginException;
 import net.ser1.stomp.Listener;
 import net.ser1.stomp.Version;
@@ -30,8 +29,8 @@ public class StompConnectionHandler
 
     private static ScheduledExecutorService executor = null;
     private static int    maxTimeoutWait = 300;
-  //private static int    timeoutWait = 10;
-  //private static int    wait = 0;
+    private static int    timeoutWait = 10;
+    private static int    wait = 0;
     public  static long   lastMessageTimeGeneral = System.currentTimeMillis();
     private static String appID = "";
     private static int    stompConnectionId = 1;
@@ -160,7 +159,7 @@ public class StompConnectionHandler
         else if (subscribedRTPPM)
             threshold = 180000;
         else
-            threshold = 1800000;
+            threshold = 30000;
 
         return threshold;
     }
@@ -190,15 +189,13 @@ public class StompConnectionHandler
         }
 
         executor = Executors.newScheduledThreadPool(1);
-        AtomicInteger wait = new AtomicInteger(0);
-        AtomicInteger timeoutWait = new AtomicInteger(0);
 
         // General timeout
         executor.scheduleWithFixedDelay(() ->
         {
-            if (wait.get() >= timeoutWait.get())
+            if (wait >= timeoutWait)
             {
-                wait.set(0);
+                wait = 0;
 
                 long time = System.currentTimeMillis() - lastMessageTimeGeneral;
 
@@ -206,9 +203,9 @@ public class StompConnectionHandler
 
                 if (isTimedOut() || !isConnected())
                 {
-                    timeoutWait.set(Math.min(maxTimeoutWait, timeoutWait.get() + 10));
+                    timeoutWait = Math.min(maxTimeoutWait, timeoutWait + 10);
 
-                    printStomp((isTimedOut() ? "Timed Out" : "") + (isTimedOut() && isClosed() ? ", " : "") + (isClosed() ? "Closed" : "") + ((isTimedOut() || isClosed()) && !isConnected() ? " & " : "") + (!isConnected() ? "Disconnected" : "") + " (" + timeoutWait.get() + "s)", true);
+                    printStomp((isTimedOut() ? "Timed Out" : "") + (isTimedOut() && isClosed() ? ", " : "") + (isClosed() ? "Closed" : "") + ((isTimedOut() || isClosed()) && !isConnected() ? " & " : "") + (!isConnected() ? "Disconnected" : "") + " (" + timeoutWait + "s)", true);
 
                     try
                     {
@@ -218,12 +215,12 @@ public class StompConnectionHandler
                         connect();
                     }
                     catch (LoginException e) { printStomp("Login Exception: " + e.getLocalizedMessage().split("\n")[0], true);}
-                    catch (IOException e)    { printStomp("IOException reconnecting", true); NRODClient.printThrowable(e, "Stomp"); }
-                    catch (Exception e)      { printStomp("Exception reconnecting:", true);  NRODClient.printThrowable(e, "Stomp"); }
+                    catch (IOException e)    { printStomp("IO Exception reconnecting", true); NRODClient.printThrowable(e, "Stomp"); }
+                    catch (Exception e)      { printStomp("Exception reconnecting", true);  NRODClient.printThrowable(e, "Stomp"); }
                 }
                 else
                 {
-                    timeoutWait.set(10);
+                    timeoutWait = 10;
 
                     long timeMVT   = MVTHandler.getInstance().getTimeout();
                     long timeRTPPM = RTPPMHandler.getInstance().getTimeout();
@@ -335,64 +332,13 @@ public class StompConnectionHandler
                 }
             }
             else
-                wait.addAndGet(10);
+                wait += 10;
         }, 10, 10, TimeUnit.SECONDS);
-
-        // MVT
-        /*executor.scheduleWithFixedDelay(() ->
-        {
-            if (waitMVT.get() >= timeoutWaitMVT.get())
-            {
-                Listener mvt = MVTHandler.getInstance();
-                waitMVT.set(0);
-
-                long time = mvt.getTimeout();
-
-                printStomp(String.format("  MVT Timeout: %02d:%02d:%02d (Threshold: %ss)", (time / (1000 * 60 * 60)) % 24, (time / (1000 * 60)) % 60, (time / 1000) % 60, (mvt.getTimeoutThreshold() / 1000)), mvt.getTimeout() > mvt.getTimeoutThreshold());
-
-                if (isTimedOut() || !isConnected())
-                {
-                    timeoutWaitMVT.set(Math.min(maxTimeoutWait, timeoutWaitMVT.get() + 10));
-
-                    printStomp((mvt.getTimeout() > mvt.getTimeoutThreshold() ? "Timed Out" : "") + "(" + timeoutWaitMVT.get() + "s)", true);
-
-                    try
-                    {
-                        if (timeoutWaitMVT.get() >= maxTimeoutWait)
-                        {
-                            if (client != null)
-                                client.disconnect();
-
-                            connect();
-                        }
-                        else
-                        {
-                            StompConnectionHandler.toggleMVT();
-
-                            try { Thread.sleep(50); }
-                            catch(InterruptedException e) {}
-
-                            StompConnectionHandler.toggleMVT();
-                        }
-                    }
-                    catch (LoginException e) { printStomp("Login Exception: " + e.getLocalizedMessage().split("\n")[0], true);}
-                    catch (IOException e)    { printStomp("IOException reconnecting", true); NRODClient.printThrowable(e, "Stomp"); }
-                    catch (Exception e)      { printStomp("Exception resubscribing:", true);  NRODClient.printThrowable(e, "Stomp"); }
-                }
-                else
-                {
-                    timeoutWaitMVT.set(10);
-                    printStomp("No problems", false);
-                }
-            }
-            else
-                waitMVT.addAndGet(10);
-        }, 10, 10, TimeUnit.SECONDS);*/
     }
 
     public static void setMaxTimeoutWait(int maxTimeoutWait)
     {
-        StompConnectionHandler.maxTimeoutWait = Math.max(60, maxTimeoutWait);
+        StompConnectionHandler.maxTimeoutWait = Math.max(600, maxTimeoutWait);
     }
 
     public static void printStomp(String message, boolean toErr)
@@ -482,13 +428,13 @@ public class StompConnectionHandler
         {
             client.unsubscribe("TD");
             StompConnectionHandler.printStomp("Unsubscribed from \"/topic/TD_ANG_SIG_AREA\" (ID: \"" + appID + stompConnectionId + "-TD\")", false);
-            subscribedTSR = false;
+            subscribedTD = false;
         }
         else
         {
             client.subscribe("/topic/TD_ANG_SIG_AREA", "TD", handlerTD);
             client.addListener("/topic/TD_ANG_SIG_AREA", rateMonitor);
-            subscribedTSR = true;
+            subscribedTD = true;
         }
         NRODClient.updatePopupMenu();
     }
@@ -502,15 +448,15 @@ public class StompConnectionHandler
     public static void printStompHeaders(Map<String, String> headers)
     {
         printStomp(
-                String.format("Message received (topic: %s, time: %s, expires: %s, id: %s, ack: %s, subscription: %s, persistent: %s%s)",
-                        String.valueOf(headers.get("destination")).replace("\\c", ":"),
-                        NRODClient.sdfTime.format(new Date(Long.parseLong(headers.get("timestamp")))),
-                        NRODClient.sdfTime.format(new Date(Long.parseLong(headers.get("expires")))),
-                        String.valueOf(headers.get("message-id")).replace("\\c", ":"),
-                        String.valueOf(headers.get("ack")).replace("\\c", ":"),
-                        String.valueOf(headers.get("subscription")).replace("\\c", ":"),
-                        String.valueOf(headers.get("persistent")).replace("\\c", ":"),
-                        headers.size() > 7 ? ", + " + (headers.size()-7) + " more" : ""
-                ), false);
+            String.format("Message received (topic: %s, time: %s, expires: %s, id: %s, ack: %s, subscription: %s, persistent: %s%s)",
+                String.valueOf(headers.get("destination")).replace("\\c", ":"),
+                NRODClient.sdfTime.format(new Date(Long.parseLong(headers.get("timestamp")))),
+                NRODClient.sdfTime.format(new Date(Long.parseLong(headers.get("expires")))),
+                String.valueOf(headers.get("message-id")).replace("\\c", ":"),
+                String.valueOf(headers.get("ack")).replace("\\c", ":"),
+                String.valueOf(headers.get("subscription")).replace("\\c", ":"),
+                String.valueOf(headers.get("persistent")).replace("\\c", ":"),
+                headers.size() > 7 ? ", + " + (headers.size()-7) + " more" : ""
+            ), false);
     }
 }
