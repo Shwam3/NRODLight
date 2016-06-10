@@ -3,6 +3,7 @@ package nrodclient;
 import java.awt.AWTException;
 import java.awt.CheckboxMenuItem;
 import java.awt.Desktop;
+import java.awt.EventQueue;
 import java.awt.Menu;
 import java.awt.MenuItem;
 import java.awt.MouseInfo;
@@ -23,8 +24,12 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.lang.management.ManagementFactory;
+import java.lang.reflect.InvocationTargetException;
 import java.text.SimpleDateFormat;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.Properties;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -34,8 +39,11 @@ import javax.swing.UnsupportedLookAndFeelException;
 import nrodclient.stomp.StompConnectionHandler;
 import nrodclient.stomp.handlers.MVTHandler;
 import nrodclient.stomp.handlers.RTPPMHandler;
+import nrodclient.stomp.handlers.TDHandler;
 import nrodclient.stomp.handlers.TSRHandler;
 import nrodclient.stomp.handlers.VSTPHandler;
+import org.java_websocket.WebSocket;
+import org.json.JSONObject;
 
 public class NRODClient
 {
@@ -51,7 +59,6 @@ public class NRODClient
     public static SimpleDateFormat sdfDateTime      = new SimpleDateFormat("dd/MM/yy HH:mm:ss");
     public static SimpleDateFormat sdfDateTimeShort = new SimpleDateFormat("dd/MM HH:mm:ss");
 
-  //public  static final Object logfileLock = new Object();
     public  static PrintStream  logStream;
     private static File         logFile;
     private static String       lastLogDate = "";
@@ -60,6 +67,10 @@ public class NRODClient
 
     private static boolean  trayIconAdded = false;
     private static TrayIcon sysTrayIcon = null;
+    
+    public  static final int     port = 6322;
+    public  static EASMWebSocket webSocket;
+    public  static DataGui       guiData;
 
     public static PrintStream stdOut = System.out;
     public static PrintStream stdErr = System.err;
@@ -90,16 +101,22 @@ public class NRODClient
                 Properties ftpLogin = new Properties();
                 ftpLogin.load(new FileInputStream(ftpLoginFile));
 
-                ftpBaseUrl  = "ftp://" + ftpLogin.getProperty("Username", "") + ":" + ftpLogin.getProperty("Password", "") + "@ftp.easignalmap.altervista.org/";
+                ftpBaseUrl = "ftp://" + ftpLogin.getProperty("Username", "") + ":" + ftpLogin.getProperty("Password", "") + "@ftp.easignalmap.altervista.org/";
             }
         }
         catch (FileNotFoundException e) {}
         catch (IOException e) { printThrowable(e, "FTP Login"); }
-
+        
+        try { EventQueue.invokeAndWait(() -> guiData = new DataGui()); }
+        catch (InvocationTargetException | InterruptedException e) { printThrowable(e, "Startup"); }
+        
         if (StompConnectionHandler.wrappedConnect())
             StompConnectionHandler.printStomp("Initialised and working", false);
         else
             StompConnectionHandler.printStomp("Unble to start", true);
+        
+        webSocket = new EASMWebSocket(port);
+        webSocket.start();
 
         Timer sleepTimer = new Timer("sleepTimer", true);
         sleepTimer.scheduleAtFixedRate(new TimerTask()
@@ -116,6 +133,31 @@ public class NRODClient
                 catch (Exception e) { printErr("[Timer] Exception: " + e.toString()); }
             }
         }, 30000, 30000);
+        Timer FullUpdateMessenger = new Timer("FullUpdateMessenger");
+        FullUpdateMessenger.schedule(new TimerTask()
+        {
+            @Override
+            public void run()
+            {
+                try
+                {
+                    JSONObject message = new JSONObject();
+                    JSONObject content = new JSONObject();
+                    content.put("type", "SEND_ALL");
+                    content.put("timestamp", Long.toString(System.currentTimeMillis()));
+                    content.put("message", new HashMap<>(TDHandler.DataMap));
+                    message.put("Message", content);
+                    String messageStr = message.toString();
+
+                    webSocket.connections().stream()
+                        .filter(c -> c != null)
+                        .filter(c -> c.isOpen())
+                        .forEach(c -> c.send(messageStr));
+                    printOut("[WebSocket] Updated all clients");
+                }
+                catch (Exception e) { printThrowable(e, "SendAll"); }
+            }
+        }, 500, 1000*60);
 
         updatePopupMenu();
     }
@@ -214,6 +256,7 @@ public class NRODClient
                 MenuItem itemOpenLog       = new MenuItem("Open Log File");
                 MenuItem itemOpenLogFolder = new MenuItem("Open Log File Folder");
                 MenuItem itemStatus        = new MenuItem("Status...");
+                MenuItem itemData          = new MenuItem("View Data...");
                 MenuItem itemRTPPMUpload   = new MenuItem("Upload RTPPM file");
                 MenuItem itemReconnect     = new MenuItem("Stomp Reconnect");
 
@@ -226,20 +269,27 @@ public class NRODClient
                 itemStatus.addActionListener((ActionEvent e) ->
                 {
                     NRODClient.updatePopupMenu();
-
-                    JOptionPane.showMessageDialog(null,
-                            "Stomp:\n"
-                          + "  Connection: " + (StompConnectionHandler.isConnected() ? "Connected" : "Disconnected") + (StompConnectionHandler.isTimedOut() ? " (timed out)" : "")
-                          + "  Timeout: " + ((System.currentTimeMillis() - StompConnectionHandler.lastMessageTimeGeneral) / 1000f) + "s\n"
-                          + "  Subscriptions:\n"
-                          + "    MVT: "   + String.format("%s - %.2fs (%ss)%n", StompConnectionHandler.isSubscribedMVT()   ? "Yes" : "No", MVTHandler  .getInstance().getTimeout() / 1000f, MVTHandler  .getInstance().getTimeout() / 1000f)
-                          + "    RTPPM: " + String.format("%s - %.2fs (%ss)%n", StompConnectionHandler.isSubscribedRTPPM() ? "Yes" : "No", RTPPMHandler.getInstance().getTimeout() / 1000f, RTPPMHandler.getInstance().getTimeout() / 1000f)
-                          + "    VSTP: "  + String.format("%s - %.2fs (%ss)%n", StompConnectionHandler.isSubscribedVSTP()  ? "Yes" : "No", VSTPHandler .getInstance().getTimeout() / 1000f, VSTPHandler .getInstance().getTimeout() / 1000f)
-                          + "    TSR: "   + String.format("%s - %.2fs (%ss)%n", StompConnectionHandler.isSubscribedTSR()   ? "Yes" : "No", TSRHandler  .getInstance().getTimeout() / 1000f, TSRHandler  .getInstance().getTimeout() / 1000f)
-                          + "Logfile: \"" + NRODClient.logFile.getName() + "\"\n"
-                          + "Started: " + NRODClient.sdfDateTime.format(ManagementFactory.getRuntimeMXBean().getStartTime()),
-                            "NRODClient - Status", JOptionPane.INFORMATION_MESSAGE);
+                    
+                    Collection<WebSocket> conns = Collections.unmodifiableCollection(NRODClient.webSocket.connections());
+                    StringBuilder statusMsg = new StringBuilder();
+                    statusMsg.append("WebSocket:");
+                    statusMsg.append("\n  Connections: ").append(conns.size());
+                    conns.stream().forEachOrdered(c -> statusMsg.append("\n    ").append(c.getRemoteSocketAddress().getAddress().getHostAddress()).append(":").append(c.getRemoteSocketAddress().getPort()));
+                    statusMsg.append("\nStomp:");
+                    statusMsg.append("\n  Connection: ").append(StompConnectionHandler.isConnected() ? "Connected" : "Disconnected").append(StompConnectionHandler.isTimedOut() ? " (timed out)" : "");
+                    statusMsg.append("\n  Timeout: ").append((System.currentTimeMillis() - StompConnectionHandler.lastMessageTimeGeneral) / 1000f).append("s");
+                    statusMsg.append("\n  Subscriptions:");
+                    statusMsg.append("\n    TD: ").append(String.format("%s - %.2fs", StompConnectionHandler.isSubscribedTD() ? "Yes" : "No", TDHandler.getInstance().getTimeout() / 1000f));
+                    statusMsg.append("\n    MVT: ").append(String.format("%s - %.2fs", StompConnectionHandler.isSubscribedMVT() ? "Yes" : "No", MVTHandler.getInstance().getTimeout() / 1000f));
+                    statusMsg.append("\n    RTPPM: ").append(String.format("%s - %.2fs", StompConnectionHandler.isSubscribedRTPPM() ? "Yes" : "No", RTPPMHandler.getInstance().getTimeout() / 1000f));
+                    statusMsg.append("\n    VSTP: ").append(String.format("%s - %.2fs", StompConnectionHandler.isSubscribedVSTP() ? "Yes" : "No", VSTPHandler.getInstance().getTimeout() / 1000f));
+                    statusMsg.append("\n    TSR: ").append(String.format("%s - %.2fs", StompConnectionHandler.isSubscribedTSR() ? "Yes" : "No", TSRHandler.getInstance().getTimeout() / 1000f));
+                    statusMsg.append("\nLogfile: \"").append(NRODClient.logFile.getName()).append("\"");
+                    statusMsg.append("\nStarted: " + NRODClient.sdfDateTime.format(ManagementFactory.getRuntimeMXBean().getStartTime()));
+                    
+                    JOptionPane.showMessageDialog(null, statusMsg.toString(), "NRODClient - Status", JOptionPane.INFORMATION_MESSAGE);
                 });
+                itemData.addActionListener(e -> NRODClient.guiData.setVisible(true));
                 itemRTPPMUpload.addActionListener((ActionEvent e) ->
                 {
                     RTPPMHandler.uploadHTML();
@@ -281,6 +331,7 @@ public class NRODClient
                 menuSubscriptions.add(itemSubscriptionsTSR);
 
                 menu.add(itemStatus);
+                menu.add(itemData);
                 menu.add(itemRTPPMUpload);
                 menu.add(itemReconnect);
                 menu.add(menuSubscriptions);

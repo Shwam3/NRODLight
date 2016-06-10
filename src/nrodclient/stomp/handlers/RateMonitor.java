@@ -13,19 +13,19 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import net.ser1.stomp.Listener;
 import nrodclient.NRODClient;
+import nrodclient.stomp.NRODListener;
 import nrodclient.stomp.StompConnectionHandler;
 
-public class RateMonitor implements Listener
+public class RateMonitor implements NRODListener
 {
     private final Map<String, AtomicInteger> rateMap = new HashMap<>();
     private static PrintWriter logStream;
     private static File        logFile;
     private static String      lastLogDate = "";
-    private final String[]     topics = {"/topic/TRAIN_MVT_ALL_TOC", "/topic/RTPPM_ALL", "/topic/VSTP_ALL", "/topic/TSR_ALL_ROUTE", "/topic/TD_ANG_SIG_AREA"};
+    private final String[]     topics = {"/topic/TRAIN_MVT_ALL_TOC", "/topic/RTPPM_ALL", "/topic/VSTP_ALL", "/topic/TSR_ALL_ROUTE", "/topic/TD_ALL_SIG_AREA"};
 
-    private static Listener instance = null;
+    private static NRODListener instance = null;
     private RateMonitor()
     {
         Date logDate = new Date();
@@ -88,7 +88,7 @@ public class RateMonitor implements Listener
         }, wait.getTimeInMillis() - currTim, 1000 * 60, TimeUnit.MILLISECONDS);
     }
 
-    public static Listener getInstance()
+    public static NRODListener getInstance()
     {
         if (instance == null)
             instance = new RateMonitor();

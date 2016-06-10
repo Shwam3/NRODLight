@@ -26,23 +26,23 @@ import java.util.TimeZone;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import jsonparser.JSONParser;
-import net.ser1.stomp.Listener;
 import nrodclient.NRODClient;
+import nrodclient.stomp.NRODListener;
 import nrodclient.stomp.StompConnectionHandler;
 
-public class RTPPMHandler implements Listener
+public class RTPPMHandler implements NRODListener
 {
     private static PrintWriter logStream;
     private static File        logFile;
   //private static String      lastLogDate = "";
 
     private String lastMessage = null;
+    private static int lastTotal = -1;
     private long lastMessageTime = 0;
-    private Date purgeDateTime = null;
     public static final Map<String, Operator> operators = new HashMap<>();
 
-    private static Listener instance = null;
-    public static Listener getInstance()
+    private static NRODListener instance = null;
+    public static NRODListener getInstance()
     {
         if (instance == null)
             instance = new RTPPMHandler();
@@ -54,20 +54,7 @@ public class RTPPMHandler implements Listener
     {
         lastMessageTime = System.currentTimeMillis();
 
-        Date currDate = new Date();
-        Calendar cal = Calendar.getInstance();
-        cal.setTime(currDate);
-        cal.set(Calendar.HOUR_OF_DAY, 2);
-        cal.set(Calendar.MINUTE, 0);
-        cal.set(Calendar.SECOND, 0);
-        cal.set(Calendar.MILLISECOND, 0);
-        if (cal.getTime().before(currDate))
-            cal.add(Calendar.DAY_OF_YEAR, 1);
-        purgeDateTime = cal.getTime();
-
-        cal.set(Calendar.HOUR_OF_DAY, 0);
-        cal.add(Calendar.DATE, -1);
-        logFile = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "RTPPM" + File.separator + NRODClient.sdfDate.format(cal.getTime()).replace("/", "-") + ".log");
+        logFile = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "RTPPM" + File.separator + NRODClient.sdfDate.format(new Date()).replace("/", "-") + ".log");
         logFile.getParentFile().mkdirs();
 
         try
@@ -77,18 +64,6 @@ public class RTPPMHandler implements Listener
         }
         catch (IOException e) { NRODClient.printThrowable(e, "RTPPM"); }
 
-        /*File saveFile = new File(NRODClient.EASMStorageDir, "RTPPM.save");
-        if (saveFile.exists())
-        {
-            try (ObjectInputStream ois = new ObjectInputStream(new BufferedInputStream(new FileInputStream(saveFile))))
-            {
-                Object obj = ois.readObject();
-
-                readData((Map<String, Map<String, Object>>) obj);
-            }
-            catch (ClassNotFoundException e) {}
-            catch (IOException e) { NRODClient.printThrowable(e, "RTPPM"); }
-        }*/
         File saveFile = new File(NRODClient.EASMStorageDir, "RTPPM.json");
         if (saveFile.exists())
         {
@@ -136,22 +111,15 @@ public class RTPPMHandler implements Listener
 
         Date timestamp = new Date(Long.parseLong(String.valueOf(ppmMap.get("timestamp"))));
 
-        if (timestamp.after(purgeDateTime))
-        {
-            Calendar purgeDateTimeCal = Calendar.getInstance();
-            purgeDateTimeCal.setTime(timestamp);
-            purgeDateTimeCal.set(Calendar.HOUR_OF_DAY, 2);
-            purgeDateTimeCal.set(Calendar.MINUTE, 0);
-            purgeDateTimeCal.set(Calendar.SECOND, 30);
-            purgeDateTimeCal.set(Calendar.MILLISECOND, 0);
-            if (purgeDateTimeCal.getTime().before(timestamp))
-                purgeDateTimeCal.add(Calendar.DAY_OF_YEAR, 1);
-            purgeDateTime = purgeDateTimeCal.getTime();
+        int newTotal = Integer.parseInt(String.valueOf(((Map) ((Map) ((Map) ppmMap.get("RTPPMData")).get("NationalPage")).get("NationalPPM")).get("Total")));
 
+        if (newTotal*0.75 < lastTotal && lastTotal >= 0)
+        {
             logFinalPPMs();
 
             operators.clear();
         }
+        lastTotal = newTotal;
 
         try
         {
@@ -187,33 +155,13 @@ public class RTPPMHandler implements Listener
         Map<String, Map<String, Object>> ppmData = new HashMap<>(getPPMData());
 
         //<editor-fold defaultstate="collapsed" desc="Print out">
-        List<String> operatorNames = new ArrayList<>(operators.keySet());
-        Collections.sort(operatorNames, String.CASE_INSENSITIVE_ORDER);
-        operatorNames.stream().forEachOrdered((operator) -> operators.get(operator).printPrettyString());
+        //List<String> operatorNames = new ArrayList<>(operators.keySet());
+        //Collections.sort(operatorNames, String.CASE_INSENSITIVE_ORDER);
+        //operatorNames.stream().forEachOrdered((operator) -> operators.get(operator).printPrettyString());
 
-        printRTPPM("Incident Messages:", false);
-        for (String incidentMessage : incidentMessages.split("\\n"))
-            printRTPPM("  " + incidentMessage.trim(), false);
-        //</editor-fold>
-
-        //<editor-fold defaultstate="collapsed" desc="Obj. Out Stream file">
-        /*try
-        {
-            File saveFile = new File(NRODClient.EASMStorageDir, "RTPPM.save");
-            if (!saveFile.exists())
-            {
-                saveFile.getParentFile().mkdirs();
-                saveFile.createNewFile();
-            }
-
-            try (ObjectOutputStream oos = new ObjectOutputStream(new BufferedOutputStream(new FileOutputStream(saveFile))))
-            {
-                oos.writeObject(ppmData);
-            }
-
-            printRTPPM("Saved oos file (" + (saveFile.length() / 1024L) + "kb)", false);
-        }
-        catch (IOException e) { NRODClient.printThrowable(e, "RTPPM"); }*/
+        //printRTPPM("Incident Messages:", false);
+        //for (String incidentMessage : incidentMessages.split("\\n"))
+        //    printRTPPM("  " + incidentMessage.trim(), false);
         //</editor-fold>
 
         //<editor-fold defaultstate="collapsed" desc="JSON file">
@@ -302,39 +250,48 @@ public class RTPPMHandler implements Listener
         //</editor-fold>
 
         //<editor-fold defaultstate="collapsed" desc="HTML file">
-        StringBuilder html = new StringBuilder("<!DOCTYPE html>\r\n");
-        html.append("<html>\r\n");
-        html.append("  <head>\r\n");
-        html.append("    <title>Real-Time PPM</title>\r\n");
-        html.append("    <meta charset=\"utf-8\">\r\n");
-        html.append("    <meta content=\"width=device-width,initial-scale=1.0\" name=\"viewport\">\r\n");
-        html.append("    <meta http-equiv=\"refresh\" content=\"300\">\r\n");
-        html.append("    <meta name=\"description\" content=\"Real-Time PPM\">\r\n");
-        html.append("    <meta name=\"author\" content=\"Cameron Bird\">\r\n");
-        html.append("    <link rel=\"icon\" type=\"image/x-icon\" href=\"/favicon.ico\">\r\n");
-        html.append("    <link rel=\"stylesheet\" type=\"text/css\" href=\"/default.css\">\r\n");
-        html.append("  </head>\r\n");
-        html.append("  <body>\r\n");
-        html.append("    <div class=\"ppmMain\">\r\n");
-        html.append("    <p id=\"title\"><abbr title=\"Real-Time (at 15 min intervals) Public Performance Measure\">Real-Time PPM</abbr>&nbsp;<span class=\"small\">(")
-                .append(NRODClient.sdfDateTimeShort.format(new Date(timestamp.getTime() - 3600000))) // Time fix
-                .append(")</span></p>\r\n");
+        StringBuilder html = new StringBuilder("<!DOCTYPE html>");
+        html.append("<html>");
+        html.append("<head>");
+        html.append("<title>Real-Time PPM</title>");
+        html.append("<meta charset=\"utf-8\">");
+        html.append("<meta content=\"width=device-width,initial-scale=1.0\" name=\"viewport\">");
+        html.append("<meta http-equiv=\"refresh\" content=\"300\">");
+        html.append("<meta name=\"description\" content=\"Real-Time PPM\">");
+        html.append("<meta name=\"author\" content=\"Cameron Bird\">");
+        html.append("<meta name=\"theme-color\" content=\"#646464\">");
+        html.append("<link rel=\"icon\" type=\"image/x-icon\" href=\"/favicon.ico\">");
+        html.append("<link rel=\"stylesheet\" type=\"text/css\" href=\"/default.css\">");
+        html.append("</head>");
+        html.append("<body>");
+        html.append("<div class=\"ppmMain\">");
+        html.append("<p id=\"title\"><abbr title=\"Real-Time (at 15 min intervals) Public Performance Measure\">Real-Time PPM</abbr>&nbsp;<span class=\"small\">(")
+                .append(NRODClient.sdfDateTimeShort.format(new Date(timestamp.getTime() - (TimeZone.getDefault().inDaylightTime(new Date()) ? 3600000 : 0)))) // Time fix
+                .append(")</span></p>");
 
         String[] keys = operators.keySet().toArray(new String[0]);
         Arrays.sort(keys, String.CASE_INSENSITIVE_ORDER);
         for (String key : keys)
-            html.append(operators.get(key).htmlString()).append("\r\n");
+            html.append(operators.get(key).htmlString()).append("");
 
-        html.append("      <div id=\"ppmIncidents\">\r\n");
-        html.append("        <p><b>Incident Messages:</b></p>\r\n");
+        html.append("<div id=\"ppmIncidents\">");
+        html.append("<p><b>Incident Messages:</b></p>");
 
         for (String incidentMessage : incidentMessages.split("\\n"))
-            html.append("        <p>").append(incidentMessage.trim()).append("</p>\r\n");
+            html.append("<p>").append(incidentMessage.trim()).append("</p>");
 
-        html.append("      </div>");
-        html.append("    </div>");
-        html.append("    <script type=\"text/javascript\">setInterval(function() { document.reload(true) }, 300000);</script>");
-        html.append("  </body>");
+        html.append("</div>");
+        html.append("</div>");
+        html.append("<script>");
+        html.append("(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){(i[r].q=i[r].q||[]).push(arguments)},i[r].l=Date.now();a=s.createElement(o),m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)})(window,document,'script','//www.google-analytics.com/analytics.js','ga');");
+        html.append("ga('create', 'UA-72821900-1', 'auto');");
+        html.append("ga('send', 'pageview');");
+        html.append("google_ad_type = \"image\";");
+        html.append("document.write('<p class=\"panelContainer\"><script src=\"http://en.ad.altervista.org/js2.ad/size=728X90/?ref='+encodeURIComponent(location.hostname+location.pathname)+'&r='+Date.now()+'\"><\\/script><\\/p>');");
+      //html.append("$('html,body').animate({ scrollTop: 0 }, 500);");
+        html.append("setInterval(function() { location.reload(true) }, 120000);");
+        html.append("</script>");
+        html.append("</body>");
         html.append("</html>");
 
         try
@@ -348,7 +305,7 @@ public class RTPPMHandler implements Listener
 
             try (BufferedWriter out = new BufferedWriter(new FileWriter(htmlFile)))
             {
-                out.write(html.toString().replace("  ", "").replace("\n", ""));
+                out.write(html.toString());
             }
             catch (FileNotFoundException e) {}
             catch (IOException e)  { NRODClient.printThrowable(e, "RTPPM HTML"); }
@@ -565,23 +522,23 @@ public class RTPPMHandler implements Listener
         {
             StringBuilder sb = new StringBuilder();
 
-            sb.append("    <h3 class=\"ppmTableTitle\">").append(NAME).append(CODE > 0 ? " ("+CODE+")" : "").append("<br/></h3>");
-            sb.append("    <table class=\"ppmTable\" sortable>");
-            sb.append("      <tr>");
-            sb.append("        <th class=\"ppmTable\" rowspan=\"2\">Service Name</th>");
-            sb.append("        <th class=\"ppmTable\" rowspan=\"2\"><abbr title=\"Public Performance Measure (today)\">PPM</abbr></th>");
-            sb.append("        <th class=\"ppmTable\" colspan=\"4\"><abbr title=\"Public Performance Measure Breakdown\">PPM Breakdown</abbr></th>");
-            sb.append("        <th class=\"ppmTable\" colspan=\"2\"><abbr title=\"Rolling Public Performance Measure (period of time)\">Rolling PPM</abbr></th>");
-            sb.append("      </tr>");
-            sb.append("      <tr>");
-            sb.append("        <th class=\"ppmTable\">Total</th>");
-            sb.append("        <th class=\"ppmTable\"><abbr title=\"<5/10 mins late\">On Time</abbr></th>");
-            sb.append("        <th class=\"ppmTable\"><abbr title=\">5/10 mins late and <30 mins late\">Late</abbr></th>");
-            sb.append("        <th class=\"ppmTable\"><abbr title=\">30 mins late or cancelled\">Cancel/Very Late</abbr></th>");
-            sb.append("        <th class=\"ppmTable\">%</th>");
-          //sb.append("        <th class=\"ppmTable\">▲▼</th>");
-            sb.append("        <th class=\"ppmTable\">&#x25B2;&#x25BC;</th>");
-            sb.append("      </tr>");
+            sb.append("<h3 class=\"ppmTableTitle\">").append(NAME).append(CODE > 0 ? " ("+CODE+")" : "").append("<br/></h3>");
+            sb.append("<table class=\"ppmTable\" sortable>");
+            sb.append("<tr>");
+            sb.append("<th class=\"ppmTable\" rowspan=\"2\">Service Name</th>");
+            sb.append("<th class=\"ppmTable\" rowspan=\"2\"><abbr title=\"Public Performance Measure (today)\">PPM</abbr></th>");
+            sb.append("<th class=\"ppmTable\" colspan=\"4\"><abbr title=\"Public Performance Measure Breakdown\">PPM Breakdown</abbr></th>");
+            sb.append("<th class=\"ppmTable\" colspan=\"2\"><abbr title=\"Rolling Public Performance Measure (period of time)\">Rolling PPM</abbr></th>");
+            sb.append("</tr>");
+            sb.append("<tr>");
+            sb.append("<th class=\"ppmTable\">Total</th>");
+            sb.append("<th class=\"ppmTable\"><abbr title=\"<5/10 mins late\">On Time</abbr></th>");
+            sb.append("<th class=\"ppmTable\"><abbr title=\">5/10 mins late and <30 mins late\">Late</abbr></th>");
+            sb.append("<th class=\"ppmTable\"><abbr title=\">30 mins late or cancelled\">Cancel/Very Late</abbr></th>");
+            sb.append("<th class=\"ppmTable\">%</th>");
+          //sb.append("<th class=\"ppmTable\">▲▼</th>");
+            sb.append("<th class=\"ppmTable\">&#x25B2;&#x25BC;</th>");
+            sb.append("</tr>");
 
             String[] keys = serviceMap.keySet().toArray(new String[0]);
             Arrays.sort(keys, String.CASE_INSENSITIVE_ORDER);
@@ -591,75 +548,75 @@ public class RTPPMHandler implements Listener
                 if (key.equals("Total"))
                     continue;
 
-                sb.append("      <tr>");
+                sb.append("<tr>");
 
                 Map<String, Object> map = serviceMap.get(key);
                 if (map != null)
                 {
-                    sb.append("         <td class=\"ppmTable\">").append(key.replace("&", "&amp;")).append("</td>");
+                    sb.append("<td class=\"ppmTable\">").append(key.replace("&", "&amp;")).append("</td>");
 
                     String ppm = String.valueOf(((Map) map.get("PPM")).get("text"));
                     if (!ppm.equals("-1"))
-                        sb.append("        <td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("PPM")).get("rag")))).append("\">").append(ppm).append("%</td>");
+                        sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("PPM")).get("rag")))).append("\">").append(ppm).append("%</td>");
                     else
                     {
-                        sb.append("        <td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("PPM")).get("rag")))).append("\">");
+                        sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("PPM")).get("rag")))).append("\">");
                         try { sb.append("<abbr title=\"guess\">").append(100 * ((Integer) Integer.parseInt((String) map.get("OnTime")) / Integer.parseInt((String) map.get("Total")))).append("%</abbr>"); }
                         catch (NumberFormatException | ArithmeticException e) { sb.append("N/A"); }
                         sb.append("</td>");
                     }
 
-                    sb.append("        <td class=\"ppmTable\">").append(map.get("Total")).append("</td>");
-                    sb.append("        <td class=\"ppmTable\">").append(map.get("OnTime")).append("</td>");
-                    sb.append("        <td class=\"ppmTable\">").append(map.get("Late")).append("</td>");
-                    sb.append("        <td class=\"ppmTable\">").append(map.get("CancelVeryLate")).append("</td>");
+                    sb.append("<td class=\"ppmTable\">").append(map.get("Total")).append("</td>");
+                    sb.append("<td class=\"ppmTable\">").append(map.get("OnTime")).append("</td>");
+                    sb.append("<td class=\"ppmTable\">").append(map.get("Late")).append("</td>");
+                    sb.append("<td class=\"ppmTable\">").append(map.get("CancelVeryLate")).append("</td>");
 
                     String rollPPM = String.valueOf(((Map) map.get("RollingPPM")).get("text"));
                     if (!rollPPM.equals("-1"))
                     {
-                        sb.append("        <td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("RollingPPM")).get("rag")))).append("\">").append(rollPPM).append("%").append("</td>");
-                        sb.append("        <td class=\"ppmTable\" style=\"color:").append(getColour(getTrendArrow(String.valueOf(((Map) map.get("RollingPPM")).get("trendInd"))))).append("\">").append(getTrendArrow(String.valueOf(((Map) map.get("RollingPPM")).get("trendInd")))).append("</td>");
+                        sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("RollingPPM")).get("rag")))).append("\">").append(rollPPM).append("%").append("</td>");
+                        sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(getTrendArrow(String.valueOf(((Map) map.get("RollingPPM")).get("trendInd"))))).append("\">").append(getTrendArrow(String.valueOf(((Map) map.get("RollingPPM")).get("trendInd")))).append("</td>");
                     }
                     else
                     {
-                        sb.append("        <td class=\"ppmTable\" style=\"color:black\">N/A</td>");
-                        sb.append("        <td class=\"ppmTable\" style=\"color:black\">N/A</td>");
+                        sb.append("<td class=\"ppmTable\" style=\"color:black\">N/A</td>");
+                        sb.append("<td class=\"ppmTable\" style=\"color:black\">N/A</td>");
                     }
 
                 }
 
-                sb.append("      </tr>");
+                sb.append("</tr>");
             }
 
             Map<String, Object> map = serviceMap.get("Total");
             if (map != null)
             {
-                sb.append("      <tr>");
+                sb.append("<tr>");
 
-                sb.append("        <td class=\"ppmTable\">Total</td>");
-                sb.append("        <td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("PPM")).get("rag")))).append("\">").append(((Map) map.get("PPM")).get("text")).append("%").append("</td>");
+                sb.append("<td class=\"ppmTable\">Total</td>");
+                sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("PPM")).get("rag")))).append("\">").append(((Map) map.get("PPM")).get("text")).append("%").append("</td>");
 
-                sb.append("        <td class=\"ppmTable\">").append(map.get("Total")).append("</td>");
-                sb.append("        <td class=\"ppmTable\">").append(map.get("OnTime")).append("</td>");
-                sb.append("        <td class=\"ppmTable\">").append(map.get("Late")).append("</td>");
-                sb.append("        <td class=\"ppmTable\">").append(map.get("CancelVeryLate")).append("</td>");
+                sb.append("<td class=\"ppmTable\">").append(map.get("Total")).append("</td>");
+                sb.append("<td class=\"ppmTable\">").append(map.get("OnTime")).append("</td>");
+                sb.append("<td class=\"ppmTable\">").append(map.get("Late")).append("</td>");
+                sb.append("<td class=\"ppmTable\">").append(map.get("CancelVeryLate")).append("</td>");
 
                 String rollPPM = String.valueOf(((Map) map.get("RollingPPM")).get("text"));
                 if (!rollPPM.equals("-1"))
                 {
-                    sb.append("        <td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("RollingPPM")).get("rag")))).append("\">").append(rollPPM).append("%").append("</td>");
-                    sb.append("        <td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("RollingPPM")).get("rag")))).append("\">").append(getTrendArrow(String.valueOf(((Map) map.get("RollingPPM")).get("trendInd")))).append("</td>");
+                    sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("RollingPPM")).get("rag")))).append("\">").append(rollPPM).append("%").append("</td>");
+                    sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("RollingPPM")).get("rag")))).append("\">").append(getTrendArrow(String.valueOf(((Map) map.get("RollingPPM")).get("trendInd")))).append("</td>");
                 }
                 else
                 {
-                    sb.append("        <td class=\"ppmTable\" style=\"color:black\">N/A</td>");
-                    sb.append("        <td class=\"ppmTable\" style=\"color:black\">N/A</td>");
+                    sb.append("<td class=\"ppmTable\" style=\"color:black\">N/A</td>");
+                    sb.append("<td class=\"ppmTable\" style=\"color:black\">N/A</td>");
                 }
 
-                sb.append("      </tr>");
+                sb.append("</tr>");
             }
 
-            sb.append("    </table>");
+            sb.append("</table>");
 
             return sb.toString().replace("▲", "&#x25B2;").replace("▬", "&#9644;").replace("▼", "&#x25BC;");
         }
@@ -671,7 +628,6 @@ public class RTPPMHandler implements Listener
             map.put("name",       NAME);
             map.put("code",       CODE);
             map.put("keySymbol",  keySymbol);
-          //map.put("ppmMap",     ppmMap);
             map.put("serviceMap", serviceMap);
 
             return map;
@@ -680,7 +636,6 @@ public class RTPPMHandler implements Listener
         public void readMap(Map<String, Object> map)
         {
             if (map.containsKey("keySymbol")  && map.get("keySymbol")  != null) keySymbol  = (String) map.get("keySymbol");
-          //if (map.containsKey("ppmMap")     && map.get("ppmMap")     != null) ppmMap     = (Map<String, Map<String, String>>) map.get("ppmMap");
             if (map.containsKey("serviceMap") && map.get("serviceMap") != null) serviceMap = (Map<String, Map<String, Object>>) map.get("serviceMap");
         }
 

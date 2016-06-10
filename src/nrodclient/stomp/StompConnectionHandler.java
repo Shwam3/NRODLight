@@ -33,7 +33,6 @@ public class StompConnectionHandler
     private static int    wait = 0;
     public  static long   lastMessageTimeGeneral = System.currentTimeMillis();
     private static String appID = "";
-    private static int    stompConnectionId = 1;
 
     private static boolean subscribedRTPPM = false;
     private static boolean subscribedMVT   = false;
@@ -76,7 +75,7 @@ public class StompConnectionHandler
             return false;
         }
 
-        appID = username + "-NRODClient-v" + NRODClient.VERSION + "-";
+        appID = username + "-NRODClient-v" + NRODClient.VERSION;
 
         if ((username != null && username.equals("")) || (password != null && password.equals("")))
         {
@@ -85,12 +84,12 @@ public class StompConnectionHandler
         }
 
         startTimeoutTimer();
-        client = new StompClient("datafeeds.networkrail.co.uk", 61618, username, password, appID + stompConnectionId);
+        client = new StompClient("datafeeds.networkrail.co.uk", 61618, username, password, appID);
 
         if (client.isConnected())
         {
             printStomp("Connected to \"datafeeds.networkrail.co.uk:61618\"", false);
-            printStomp("  ID:       " + appID + stompConnectionId, false);
+            printStomp("  ID:       " + appID, false);
             printStomp("  Username: " + username, false);
             printStomp("  Password: " + password, false);
         }
@@ -349,8 +348,7 @@ public class StompConnectionHandler
             NRODClient.printOut("[Stomp] " + message);
     }
 
-    public static String getConnectionName() { return appID + stompConnectionId; }
-    public static int incrementConnectionId() { return ++stompConnectionId; }
+    public static String getConnectionName() { return appID; }
 
     public static void ack(String ackId)
     {
@@ -363,7 +361,7 @@ public class StompConnectionHandler
         if (subscribedRTPPM)
         {
             client.unsubscribe("RTPPM");
-            StompConnectionHandler.printStomp("Unsubscribed from \"/topic/RTPPM_ALL\" (ID: \"" + appID + stompConnectionId + "-RTPPM\")", false);
+            StompConnectionHandler.printStomp("Unsubscribed from \"/topic/RTPPM_ALL\" (ID: \"" + appID + "-RTPPM\")", false);
             subscribedRTPPM = false;
         }
         else
@@ -379,7 +377,7 @@ public class StompConnectionHandler
         if (subscribedMVT)
         {
             client.unsubscribe("MVT");
-            StompConnectionHandler.printStomp("Unsubscribed from \"/topic/TRAIN_MVT_ALL_TOC\" (ID: \"" + appID + stompConnectionId + "-MVT\")", false);
+            StompConnectionHandler.printStomp("Unsubscribed from \"/topic/TRAIN_MVT_ALL_TOC\" (ID: \"" + appID + "-MVT\")", false);
             subscribedMVT = false;
         }
         else
@@ -395,7 +393,7 @@ public class StompConnectionHandler
         if (subscribedVSTP)
         {
             client.unsubscribe("VSTP");
-            StompConnectionHandler.printStomp("Unsubscribed from \"/topic/VSTP_ALL\" (ID: \"" + appID + stompConnectionId + "-VSTP\")", false);
+            StompConnectionHandler.printStomp("Unsubscribed from \"/topic/VSTP_ALL\" (ID: \"" + appID + "-VSTP\")", false);
             subscribedVSTP = false;
         }
         else
@@ -411,7 +409,7 @@ public class StompConnectionHandler
         if (subscribedTSR)
         {
             client.unsubscribe("TSR");
-            StompConnectionHandler.printStomp("Unsubscribed from \"/topic/TSR_ALL_ROUTE\" (ID: \"" + appID + stompConnectionId + "-TSR\")", false);
+            StompConnectionHandler.printStomp("Unsubscribed from \"/topic/TSR_ALL_ROUTE\" (ID: \"" + appID + "-TSR\")", false);
             subscribedTSR = false;
         }
         else
@@ -427,13 +425,13 @@ public class StompConnectionHandler
         if (subscribedTD)
         {
             client.unsubscribe("TD");
-            StompConnectionHandler.printStomp("Unsubscribed from \"/topic/TD_ANG_SIG_AREA\" (ID: \"" + appID + stompConnectionId + "-TD\")", false);
+            StompConnectionHandler.printStomp("Unsubscribed from \"/topic/TD_ALL_SIG_AREA\" (ID: \"" + appID + "-TD\")", false);
             subscribedTD = false;
         }
         else
         {
-            client.subscribe("/topic/TD_ANG_SIG_AREA", "TD", handlerTD);
-            client.addListener("/topic/TD_ANG_SIG_AREA", rateMonitor);
+            client.subscribe("/topic/TD_ALL_SIG_AREA", "TD", handlerTD);
+            client.addListener("/topic/TD_ALL_SIG_AREA", rateMonitor);
             subscribedTD = true;
         }
         NRODClient.updatePopupMenu();
@@ -448,9 +446,10 @@ public class StompConnectionHandler
     public static void printStompHeaders(Map<String, String> headers)
     {
         printStomp(
-            String.format("Message received (topic: %s, time: %s, expires: %s, id: %s, ack: %s, subscription: %s, persistent: %s%s)",
+            String.format("Message received (topic: %s, time: %s, delay: %s, expires: %s, id: %s, ack: %s, subscription: %s, persistent: %s%s)",
                 String.valueOf(headers.get("destination")).replace("\\c", ":"),
                 NRODClient.sdfTime.format(new Date(Long.parseLong(headers.get("timestamp")))),
+                (System.currentTimeMillis() - Long.parseLong(headers.get("timestamp")))/1000f + "s",
                 NRODClient.sdfTime.format(new Date(Long.parseLong(headers.get("expires")))),
                 String.valueOf(headers.get("message-id")).replace("\\c", ":"),
                 String.valueOf(headers.get("ack")).replace("\\c", ":"),

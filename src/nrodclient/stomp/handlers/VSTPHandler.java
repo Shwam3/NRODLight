@@ -1,17 +1,17 @@
 package nrodclient.stomp.handlers;
 
 import java.util.Map;
-import net.ser1.stomp.Listener;
 import nrodclient.NRODClient;
+import nrodclient.stomp.NRODListener;
 import nrodclient.stomp.StompConnectionHandler;
 
-public class VSTPHandler implements Listener
+public class VSTPHandler implements NRODListener
 {
     private long lastMessageTime = 0;
 
-    private static Listener instance = null;
+    private static NRODListener instance = null;
     private VSTPHandler() { lastMessageTime = System.currentTimeMillis(); }
-    public static Listener getInstance()
+    public static NRODListener getInstance()
     {
         if (instance == null)
             instance = new VSTPHandler();

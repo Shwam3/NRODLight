@@ -2,26 +2,24 @@ package nrodclient.stomp.handlers;
 
 import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import jsonparser.JSONParser;
-import net.ser1.stomp.Listener;
 import nrodclient.NRODClient;
+import nrodclient.stomp.NRODListener;
 import nrodclient.stomp.StompConnectionHandler;
 
-public class TSRHandler implements Listener
+public class TSRHandler implements NRODListener
 {
     private long lastMessageTime = 0;
 
-    private static Listener instance = null;
+    private static NRODListener instance = null;
     private TSRHandler() { lastMessageTime = System.currentTimeMillis(); }
-    public static Listener getInstance()
+    public static NRODListener getInstance()
     {
         if (instance == null)
             instance = new TSRHandler();
@@ -37,8 +35,11 @@ public class TSRHandler implements Listener
 
         try
         {
-            logFile.getParentFile().mkdirs();
-            logFile.createNewFile();
+            if (!logFile.exists())
+            {
+                logFile.getParentFile().mkdirs();
+                logFile.createNewFile();
+            }
 
             logFileWriter = new PrintWriter(new BufferedWriter(new FileWriter(logFile, true)), true);
         }
@@ -56,7 +57,7 @@ public class TSRHandler implements Listener
             file.getParentFile().mkdirs();
             file.createNewFile();
 
-            try (BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(file))))
+            try (BufferedWriter bw = new BufferedWriter(new FileWriter(file, true)))
             {
                 bw.write(messageJSON + "\r\n");
             }
