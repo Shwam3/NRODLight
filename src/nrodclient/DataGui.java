@@ -130,7 +130,7 @@ public class DataGui extends JFrame
 
         DefaultListModel<String> modelCClass = new DefaultListModel<>();
         TDData.keySet().stream()
-                .filter(id -> !id.startsWith("XX"))
+                //.filter(id -> !id.startsWith("XX"))
                 .filter(id -> !id.contains(":"))
                 .filter(id -> id.length() == 6)
                 .filter(id -> elementFitsFilter(id))
@@ -138,15 +138,14 @@ public class DataGui extends JFrame
                 .sorted(String.CASE_INSENSITIVE_ORDER)
                 .forEachOrdered(id ->
                 {
-                    String val = TDData.get(id);
-                    int len = val.length();
-                    modelCClass.addElement(String.format("%s: '%s'", id, len == 4 ? val : "    "));
+                    String val = String.valueOf(TDData.get(id));
+                    modelCClass.addElement(String.format("%s: '%s'", id, !val.isEmpty() ? val : "    "));
                 });
 
         if (modelCClass.isEmpty())
         {
             TDData.keySet().stream()
-                .filter(id -> !id.startsWith("XX"))
+                //.filter(id -> !id.startsWith("XX"))
                 .filter(id -> !id.contains(":"))
                 .filter(id -> id.length() == 6)
                 .filter(id -> hideBlanks ? !String.valueOf(TDData.get(id)).replace("null", "").trim().equals("") : true)
@@ -157,7 +156,7 @@ public class DataGui extends JFrame
 
         DefaultListModel<String> modelSClass = new DefaultListModel<>();
         TDData.keySet().stream()
-                .filter(id -> !id.startsWith("XX"))
+                //.filter(id -> !id.startsWith("XX"))
                 .filter(id -> id.length() != 6 || id.contains(":"))
                 .filter(id -> elementFitsFilter(id))
                 .sorted(String.CASE_INSENSITIVE_ORDER)
@@ -166,7 +165,7 @@ public class DataGui extends JFrame
         if (modelSClass.isEmpty())
         {
             TDData.keySet().stream()
-                .filter(id -> !id.startsWith("XX"))
+                //.filter(id -> !id.startsWith("XX"))
                 .filter(id -> id.length() != 6 || id.contains(":"))
                 .sorted(String.CASE_INSENSITIVE_ORDER)
                 .forEachOrdered(id -> modelSClass.addElement(id + ": " + Objects.requireNonNull(TDData.get(id), id + " is null")));

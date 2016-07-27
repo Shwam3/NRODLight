@@ -30,6 +30,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -47,7 +48,7 @@ import org.json.JSONObject;
 
 public class NRODClient
 {
-    public static final String VERSION = "1";
+    public static final String VERSION;
 
     public  static final boolean verbose = false;
     public  static boolean stop = true;
@@ -68,12 +69,39 @@ public class NRODClient
     private static boolean  trayIconAdded = false;
     private static TrayIcon sysTrayIcon = null;
     
-    public  static final int     port = 6322;
+    public  static final int     port;
     public  static EASMWebSocket webSocket;
     public  static DataGui       guiData;
 
     public static PrintStream stdOut = System.out;
     public static PrintStream stdErr = System.err;
+    
+    static
+    {
+        String ver = "1";
+        int prt = 6322;
+        
+        /*File versionFile = new File(EASMStorageDir, "NROD_Version.properties");
+        try
+        {
+            //if (versionFile.exists())
+            //{
+            //    Properties versionProps = new Properties();
+            //    versionProps.load(new FileInputStream(versionFile));
+            //    ver = versionProps.getProperty("version", ver);
+            //}
+
+            //if (!NRODClient.class.getResource(NRODClient.class.getSimpleName() + ".class").toString().contains(".jar"))
+            //{
+            //    ver += "-DEV";
+            //    prt += 2;
+            //}
+        }
+        catch (IOException ex) { ex.printStackTrace(); }*/
+        
+        VERSION = ver;
+        port = prt;
+    }
 
     public static void main(String[] args)
     {
@@ -257,6 +285,7 @@ public class NRODClient
                 MenuItem itemOpenLogFolder = new MenuItem("Open Log File Folder");
                 MenuItem itemStatus        = new MenuItem("Status...");
                 MenuItem itemData          = new MenuItem("View Data...");
+                MenuItem itemInputData     = new MenuItem("Input Data...");
                 MenuItem itemRTPPMUpload   = new MenuItem("Upload RTPPM file");
                 MenuItem itemReconnect     = new MenuItem("Stomp Reconnect");
 
@@ -274,7 +303,7 @@ public class NRODClient
                     StringBuilder statusMsg = new StringBuilder();
                     statusMsg.append("WebSocket:");
                     statusMsg.append("\n  Connections: ").append(conns.size());
-                    conns.stream().forEachOrdered(c -> statusMsg.append("\n    ").append(c.getRemoteSocketAddress().getAddress().getHostAddress()).append(":").append(c.getRemoteSocketAddress().getPort()));
+                    conns.stream().filter(c -> c != null).forEachOrdered(c -> statusMsg.append("\n    ").append(c.getRemoteSocketAddress().getAddress().getHostAddress()).append(":").append(c.getRemoteSocketAddress().getPort()));
                     statusMsg.append("\nStomp:");
                     statusMsg.append("\n  Connection: ").append(StompConnectionHandler.isConnected() ? "Connected" : "Disconnected").append(StompConnectionHandler.isTimedOut() ? " (timed out)" : "");
                     statusMsg.append("\n  Timeout: ").append((System.currentTimeMillis() - StompConnectionHandler.lastMessageTimeGeneral) / 1000f).append("s");
@@ -285,11 +314,39 @@ public class NRODClient
                     statusMsg.append("\n    VSTP: ").append(String.format("%s - %.2fs", StompConnectionHandler.isSubscribedVSTP() ? "Yes" : "No", VSTPHandler.getInstance().getTimeout() / 1000f));
                     statusMsg.append("\n    TSR: ").append(String.format("%s - %.2fs", StompConnectionHandler.isSubscribedTSR() ? "Yes" : "No", TSRHandler.getInstance().getTimeout() / 1000f));
                     statusMsg.append("\nLogfile: \"").append(NRODClient.logFile.getName()).append("\"");
-                    statusMsg.append("\nStarted: " + NRODClient.sdfDateTime.format(ManagementFactory.getRuntimeMXBean().getStartTime()));
+                    statusMsg.append("\nStarted: ").append(NRODClient.sdfDateTime.format(ManagementFactory.getRuntimeMXBean().getStartTime()));
                     
                     JOptionPane.showMessageDialog(null, statusMsg.toString(), "NRODClient - Status", JOptionPane.INFORMATION_MESSAGE);
                 });
                 itemData.addActionListener(e -> NRODClient.guiData.setVisible(true));
+                itemInputData.addActionListener(e ->
+                {
+                    String input = JOptionPane.showInputDialog(null, "Please input the data in the format: 'key:value;key:value':", "Input Data", JOptionPane.QUESTION_MESSAGE);
+                    if (input != null)
+                    {
+                        Map<String, String> map = new HashMap();
+                        String[] pairs = input.split(";");
+                        
+                        for (String pair : pairs)
+                            if (pair.length() >= 7)
+                                if (pair.charAt(6) == ':')
+                                    map.put(pair.substring(0, 6), pair.substring(7));
+                            
+                        JSONObject container = new JSONObject();
+                        JSONObject message = new JSONObject();
+                        message.put("type", "SEND_UPDATE");
+                        message.put("timestamp", System.currentTimeMillis());
+                        message.put("message", map);
+                        container.put("Message", message);
+                        TDHandler.DataMap.putAll(map);
+
+                        String messageStr = container.toString();
+                        NRODClient.webSocket.connections().stream()
+                                .filter(c -> c != null)
+                                .filter(c -> c.isOpen())
+                                .forEach(c -> c.send(messageStr));
+                    }
+                });
                 itemRTPPMUpload.addActionListener((ActionEvent e) ->
                 {
                     RTPPMHandler.uploadHTML();
@@ -332,6 +389,7 @@ public class NRODClient
 
                 menu.add(itemStatus);
                 menu.add(itemData);
+                menu.add(itemInputData);
                 menu.add(itemRTPPMUpload);
                 menu.add(itemReconnect);
                 menu.add(menuSubscriptions);

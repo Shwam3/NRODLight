@@ -36,7 +36,7 @@ public class StompClient extends Stomp implements MessageReceiver
         header.put("login", login);
         header.put("passcode", pass);
         header.put("client-id", clientId);
-        header.put("heart-beat", "0,10000");
+        header.put("heart-beat", "30000,10000");
         header.put("accept-version", "1.2");
 
         transmit(Command.CONNECT, header, null);
