@@ -26,7 +26,7 @@ public class MVTHandler implements NRODListener
     private MVTHandler()
     {
         Date logDate = new Date(System.currentTimeMillis());
-        logFile = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "Movement" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".log");
+        logFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "Movement" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".log");
         logFile.getParentFile().mkdirs();
         lastLogDate = NRODClient.sdfDate.format(logDate);
         
@@ -423,7 +423,7 @@ public class MVTHandler implements NRODListener
             Date logDate = new Date();
             lastLogDate = NRODClient.sdfDate.format(logDate);
 
-            logFile = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "Movement" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".log");
+            logFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "Movement" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".log");
             logFile.getParentFile().mkdirs();
 
             try

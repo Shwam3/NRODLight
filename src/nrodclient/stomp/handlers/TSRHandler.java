@@ -6,12 +6,12 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.Date;
-import java.util.List;
 import java.util.Map;
-import jsonparser.JSONParser;
 import nrodclient.NRODClient;
 import nrodclient.stomp.NRODListener;
 import nrodclient.stomp.StompConnectionHandler;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 public class TSRHandler implements NRODListener
 {
@@ -30,7 +30,7 @@ public class TSRHandler implements NRODListener
     @Override
     public synchronized void message(Map<String, String> headers, String messageJSON)
     {
-        File logFile = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "TSR" + File.separator + NRODClient.sdfDate.format(new Date()).replace("/", "-") + ".log");
+        File logFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TSR" + File.separator + NRODClient.sdfDate.format(new Date()).replace("/", "-") + ".log");
         PrintWriter logFileWriter = null;
 
         try
@@ -47,13 +47,13 @@ public class TSRHandler implements NRODListener
 
         StompConnectionHandler.printStompHeaders(headers);
 
-        Map<String, Object> message = (Map<String, Object>) ((Map<String, Object>) JSONParser.parseJSON(messageJSON).get("TSRBatchMsgV1")).get("TSRBatchMsg");
-        String routeGroup = String.valueOf(message.get("routeGroup")) + " (" + String.valueOf(message.get("routeGroupCode")) + ")";
-        List<Map<String, Object>> TSRs = ((List<Map<String, Object>>) message.get("tsr"));
+        JSONObject message = new JSONObject(messageJSON).getJSONObject("TSRBatchMsgV1").getJSONObject("TSRBatchMsg");
+        String routeGroup = message.getString("routeGroup") + " (" + message.getString("routeGroupCode") + ")";
+        JSONArray TSRs = message.getJSONArray("tsr");
 
         try
         {
-            File file = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "TSR" + File.separator + NRODClient.sdfDate.format(new Date(/*Long.parseLong(String.valueOf(message.get("timestamp")))*/)).replace("/", "-") + ".json");
+            File file = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TSR" + File.separator + NRODClient.sdfDate.format(new Date(/*Long.parseLong(String.valueOf(message.get("timestamp")))*/)).replace("/", "-") + ".json");
             file.getParentFile().mkdirs();
             file.createNewFile();
 
@@ -73,26 +73,28 @@ public class TSRHandler implements NRODListener
 
             String header = String.format("[%s] Published: %s, WON Start: %s, WON End: %s, WON Name: %s, No of TSRs: %s",
                     routeGroup,
-                    NRODClient.sdfDateTime.format(new Date(Long.parseLong(String.valueOf(message.get("publishDate"))))),
-                    NRODClient.sdfDateTime.format(new Date(Long.parseLong(String.valueOf(message.get("WONStartDate"))))),
-                    NRODClient.sdfDateTime.format(new Date(Long.parseLong(String.valueOf(message.get("WONEndDate"))))),
-                    message.get("publishSource"),
-                    TSRs.size()
+                    NRODClient.sdfDateTime.format(new Date(Long.parseLong(message.getString("publishDate")))),
+                    NRODClient.sdfDateTime.format(new Date(Long.parseLong(message.getString("WONStartDate")))),
+                    NRODClient.sdfDateTime.format(new Date(Long.parseLong(message.getString("WONEndDate")))),
+                    message.getString("publishSource"),
+                    TSRs.length()
             );
             printTSR(header, false);
             if (logFileWriter != null)
                 logFileWriter.println("[".concat(NRODClient.sdfDateTime.format(new Date())).concat("] ").concat(header));
         }
 
-        for (Map<String, Object> tsr : TSRs)
+        for (Object tsrObj : TSRs)
         {
-            if (!tsr.containsKey("TSRID") || !tsr.containsKey("TSRReference") || !tsr.containsKey("creationDate") ||
-                    !tsr.containsKey("RouteCode")    || !tsr.containsKey("RouteOrder")    || !tsr.containsKey("FromLocation") ||
-                    !tsr.containsKey("ToLocation")   || !tsr.containsKey("LineName")      || !tsr.containsKey("MileageFrom") ||
-                    !tsr.containsKey("SubunitFrom")  || !tsr.containsKey("MileageTo")     || !tsr.containsKey("SubunitTo") ||
-                    !tsr.containsKey("Direction")    || !tsr.containsKey("MovingMileage") || !tsr.containsKey("PassengerSpeed") ||
-                    !tsr.containsKey("FreightSpeed") || !tsr.containsKey("ValidFromDate") || !tsr.containsKey("ValidToDate") ||
-                    !tsr.containsKey("Reason")       || !tsr.containsKey("Requestor")     || !tsr.containsKey("Comments"))
+            JSONObject tsr = (JSONObject) tsrObj;
+            
+            if (!tsr.has("TSRID") || !tsr.has("TSRReference") || !tsr.has("creationDate") ||
+                    !tsr.has("RouteCode")    || !tsr.has("RouteOrder")    || !tsr.has("FromLocation") ||
+                    !tsr.has("ToLocation")   || !tsr.has("LineName")      || !tsr.has("MileageFrom") ||
+                    !tsr.has("SubunitFrom")  || !tsr.has("MileageTo")     || !tsr.has("SubunitTo") ||
+                    !tsr.has("Direction")    || !tsr.has("MovingMileage") || !tsr.has("PassengerSpeed") ||
+                    !tsr.has("FreightSpeed") || !tsr.has("ValidFromDate") || !tsr.has("ValidToDate") ||
+                    !tsr.has("Reason")       || !tsr.has("Requestor")     || !tsr.has("Comments"))
             {
                 printTSR("[" + routeGroup + "]   " + tsr.toString(), true);
                 if (logFileWriter != null)
@@ -104,20 +106,20 @@ public class TSRHandler implements NRODListener
                         + "Location (Name): %s - %s (%s), Location (Mileage): %sm%sc - %sm%sc, Direction: %s, Moving: %s, "
                         + "Speed (Pass/Freight): %s / %s, Dates: %s - %s, Reason: %s, Requestor: %s, Comments: %s",
                         routeGroup,
-                        tsr.get("TSRID"),
-                        tsr.get("TSRReference"),
-                        NRODClient.sdfDateTime.format(new Date(Long.parseLong(String.valueOf(tsr.get("creationDate"))))),
-                        tsr.get("RouteCode"), tsr.get("RouteOrder"),
-                        tsr.get("FromLocation"), tsr.get("ToLocation"), tsr.get("LineName"),
-                        tsr.get("MileageFrom"), tsr.get("SubunitFrom"), tsr.get("MileageTo"), tsr.get("SubunitTo"),
-                        tsr.get("Direction"),
-                        tsr.get("MovingMileage"),
-                        tsr.get("PassengerSpeed"), tsr.get("FreightSpeed"),
-                        NRODClient.sdfDateTime.format(new Date(Long.parseLong(String.valueOf(tsr.get("ValidFromDate"))))),
-                        NRODClient.sdfDateTime.format(new Date(Long.parseLong(String.valueOf(tsr.get("ValidToDate"))))),
-                        tsr.get("Reason") == null ? "not given" : tsr.get("Reason"),
-                        tsr.get("Requestor") == null ? "unknown" : tsr.get("Requestor"),
-                        tsr.get("Comments") == null ? "" : tsr.get("Comments")
+                        tsr.getString("TSRID"),
+                        tsr.getString("TSRReference"),
+                        NRODClient.sdfDateTime.format(new Date(Long.parseLong(tsr.getString("creationDate")))),
+                        tsr.getString("RouteCode"), tsr.getString("RouteOrder"),
+                        tsr.getString("FromLocation"), tsr.getString("ToLocation"), tsr.getString("LineName"),
+                        tsr.getString("MileageFrom"), tsr.getString("SubunitFrom"), tsr.getString("MileageTo"), tsr.getString("SubunitTo"),
+                        tsr.getString("Direction"),
+                        tsr.getString("MovingMileage"),
+                        tsr.getString("PassengerSpeed"), tsr.getString("FreightSpeed"),
+                        NRODClient.sdfDateTime.format(new Date(Long.parseLong(tsr.getString("ValidFromDate")))),
+                        NRODClient.sdfDateTime.format(new Date(Long.parseLong(tsr.getString("ValidToDate")))),
+                        tsr.optString("Reason", "not given"),
+                        tsr.optString("Requestor", "unknown"),
+                        tsr.optString("Comments", "")
                 );
                 printTSR(tsrStr, false);
                 if (logFileWriter != null)

@@ -29,22 +29,22 @@ public class TDHandler implements NRODListener
 
     private static boolean isSaving = false;
     
-    private final static List<String> areaFilters = Collections.unmodifiableList(Arrays.asList("AW","CA","CC","EN","K2","KX","LS","PB","SE","SI","SO","SX","UR","U2","U3","WG"));
+    private final static List<String> areaFilters = Collections.unmodifiableList(Arrays.asList("AW","CA","CC","DR","EN","K2","KX","LS","NX","PB","Q1","Q2","Q3","Q4","SE","SI","SO","SX","UR","U2","U3","WG"));
 
-    File TDDataFile = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "TD" + File.separator + "TDData.json");
+    File TDDataFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TD" + File.separator + "TDData.json");
 
     private static NRODListener instance = null;
     private TDHandler()
     {
         Date logDate = new Date(System.currentTimeMillis());
-        logFile = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "TD" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".log");
+        logFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TD" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".log");
         logFile.getParentFile().mkdirs();
         lastLogDate = NRODClient.sdfDate.format(logDate);
 
         try { logStream = new PrintWriter(new BufferedWriter(new FileWriter(logFile, true)), true); }
         catch (IOException e) { NRODClient.printThrowable(e, "TD"); }
         
-        File BaseDataFile = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "TD" + File.separator + "TDBaseData.json");
+        File BaseDataFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TD" + File.separator + "TDBaseData.json");
         if (BaseDataFile.exists())
         {
             String jsonString = "";
@@ -66,7 +66,7 @@ public class TDHandler implements NRODListener
             catch (JSONException e) { NRODClient.printThrowable(e, "TD"); }
         }
         
-        File TDDataDir = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "TD" + File.separator + "TDData");
+        File TDDataDir = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TD" + File.separator + "TDData");
         
         for (File perAreaDir : TDDataDir.listFiles())
         {
@@ -100,7 +100,7 @@ public class TDHandler implements NRODListener
         
         DataMap.keySet().stream().forEach(key ->
         {
-            File DataFile = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "TD"
+            File DataFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TD"
                 + File.separator + "TDData" + File.separator + key.substring(0, 2) + File.separator + key.substring(2).replace(":", "-") + ".td");
             File DataFileNew = new File(DataFile.getAbsoluteFile() + ".new");
 
@@ -235,10 +235,9 @@ public class TDHandler implements NRODListener
                                             data[i]),
                                         false,
                                         Long.parseLong(indvMsg.getString("time")));
-                                
-                                DataMap.put(address, String.valueOf(data[i]));
                             }
                             updateMap.put(address, String.valueOf(data[i]));
+                            DataMap.put(address, String.valueOf(data[i]));
                         }
                         break;
                     }
@@ -286,6 +285,10 @@ public class TDHandler implements NRODListener
                         .filter(c -> c != null)
                         .filter(c -> c.isOpen())
                         .forEach(c -> c.send(messageStr));
+                NRODClient.webSocketSSL.connections().stream()
+                        .filter(c -> c != null)
+                        .filter(c -> c.isOpen())
+                        .forEach(c -> c.send(messageStr));
             }
             catch (Exception e) { NRODClient.printThrowable(e, "TD"); }
         }
@@ -329,7 +332,7 @@ public class TDHandler implements NRODListener
         {
             updateMap.keySet().stream().forEach(key ->
             {
-                File DataFile = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "TD"
+                File DataFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TD"
                     + File.separator + "TDData" + File.separator + key.substring(0, 2) + File.separator + key.substring(2).replace(":", "-") + ".td");
                 File DataFileNew = new File(DataFile.getAbsoluteFile() + ".new");
                 
@@ -389,7 +392,7 @@ public class TDHandler implements NRODListener
             Date logDate = new Date();
             lastLogDate = NRODClient.sdfDate.format(logDate);
 
-            logFile = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "TD" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".log");
+            logFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TD" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".log");
             logFile.getParentFile().mkdirs();
 
             try
@@ -406,7 +409,8 @@ public class TDHandler implements NRODListener
                 sb.deleteCharAt(sb.length()-1);
             sb.append("\r\n}}");
 
-            File fileReplaySave = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "ReplaySaves" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".json");
+            File fileReplaySave = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "ReplaySaves" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".json");
+            fileReplaySave.getParentFile().mkdirs();
             try (BufferedWriter bw = new BufferedWriter(new FileWriter(fileReplaySave)))
             {
                 bw.write(sb.toString());

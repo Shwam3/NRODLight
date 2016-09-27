@@ -60,7 +60,7 @@ public class StompConnectionHandler
         String username;
         String password;
 
-        File loginFile = new File(NRODClient.EASMStorageDir, "NROD_Login.properties");
+        File loginFile = new File(NRODClient.EASM_STORAGE_DIR, "NROD_Login.properties");
         try (FileInputStream in = new FileInputStream(loginFile))
         {
             Properties loginProps = new Properties();

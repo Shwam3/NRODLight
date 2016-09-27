@@ -25,10 +25,11 @@ import java.util.Map;
 import java.util.TimeZone;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import jsonparser.JSONParser;
 import nrodclient.NRODClient;
 import nrodclient.stomp.NRODListener;
 import nrodclient.stomp.StompConnectionHandler;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 public class RTPPMHandler implements NRODListener
 {
@@ -54,7 +55,7 @@ public class RTPPMHandler implements NRODListener
     {
         lastMessageTime = System.currentTimeMillis();
 
-        logFile = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "RTPPM" + File.separator + NRODClient.sdfDate.format(new Date()).replace("/", "-") + ".log");
+        logFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "RTPPM" + File.separator + NRODClient.sdfDate.format(new Date()).replace("/", "-") + ".log");
         logFile.getParentFile().mkdirs();
 
         try
@@ -64,7 +65,7 @@ public class RTPPMHandler implements NRODListener
         }
         catch (IOException e) { NRODClient.printThrowable(e, "RTPPM"); }
 
-        File saveFile = new File(NRODClient.EASMStorageDir, "RTPPM.json");
+        File saveFile = new File(NRODClient.EASM_STORAGE_DIR, "RTPPM.json");
         if (saveFile.exists())
         {
             try (BufferedReader br = new BufferedReader(new FileReader(saveFile)))
@@ -76,16 +77,16 @@ public class RTPPMHandler implements NRODListener
                     jsonString += line;
 
                 NRODClient.stdOut.println(jsonString);
-                Map<String, Object> json = JSONParser.parseJSON("{" + jsonString + "}");
+                JSONObject json = new JSONObject("{" + jsonString + "}");
 
-                readData((Map<String, Map<String, Object>>) json.get("RTPPMData"));
+                readData(json.getJSONObject("RTPPMData"));
 
                 List<String> operatorNames = new ArrayList<>(operators.keySet());
                 Collections.sort(operatorNames, String.CASE_INSENSITIVE_ORDER);
                 operatorNames.stream().forEachOrdered((operator) -> operators.get(operator).printPrettyString());
 
                 printRTPPM("Incident Messages:", false);
-                for (String incidentMessage : String.valueOf(json.get("IncidentMessages")).split("\\n"))
+                for (String incidentMessage : json.optString("IncidentMessages").split("\\n"))
                     printRTPPM("  " + incidentMessage.trim(), false);
             }
             catch (IOException e) { NRODClient.printThrowable(e, "RTPPM"); }
@@ -106,12 +107,12 @@ public class RTPPMHandler implements NRODListener
     {
         StompConnectionHandler.printStompHeaders(headers);
 
-        Map<String, Object> ppmMap = (Map<String, Object>) JSONParser.parseJSON(message).get("RTPPMDataMsgV1");
-        String incidentMessages = String.valueOf(((Map) ((Map) ppmMap.get("RTPPMData")).get("NationalPage")).get("WebMsgOfMoment")).trim();
+        JSONObject ppmMap = new JSONObject(message).getJSONObject("RTPPMDataMsgV1");
+        String incidentMessages = ppmMap.getJSONObject("RTPPMData").getJSONObject("NationalPage").optString("WebMsgOfMoment").trim();
 
-        Date timestamp = new Date(Long.parseLong(String.valueOf(ppmMap.get("timestamp"))));
+        Date timestamp = new Date(Long.parseLong(ppmMap.getString("timestamp")));
 
-        int newTotal = Integer.parseInt(String.valueOf(((Map) ((Map) ((Map) ppmMap.get("RTPPMData")).get("NationalPage")).get("NationalPPM")).get("Total")));
+        int newTotal = Integer.parseInt(ppmMap.getJSONObject("RTPPMData").getJSONObject("NationalPage").getJSONObject("NationalPPM").getString("Total"));
 
         if (newTotal*0.75 < lastTotal && lastTotal >= 0)
         {
@@ -123,26 +124,30 @@ public class RTPPMHandler implements NRODListener
 
         try
         {
-            List<Map<String, Object>> operatorsPPM = (List<Map<String, Object>>) ((Map) ppmMap.get("RTPPMData")).get("OperatorPage");
-            for (Map<String, Object> map : operatorsPPM)
+            JSONArray operatorsPPM = ppmMap.getJSONObject("RTPPMData").getJSONArray("OperatorPage");
+            for (Object mapObj : operatorsPPM)
             {
-                String operatorName = String.valueOf(((Map) map.get("Operator")).get("name"));
+                JSONObject map = (JSONObject) mapObj;
+                
+                String operatorName = map.getJSONObject("Operator").getString("name");
                 Operator operator;
                 if (operators.containsKey(operatorName))
                     operator = operators.get(operatorName);
                 else
                 {
-                    operator = new Operator(operatorName, Integer.parseInt(String.valueOf(((Map) map.get("Operator")).get("code"))));
+                    operator = new Operator(operatorName, Integer.parseInt(map.getJSONObject("Operator").getString("code")));
                     operators.put(operatorName, operator);
                 }
 
-                operator.putService("Total", (Map<String, Object>) map.get("Operator"));
+                operator.putService("Total", map.getJSONObject("Operator"));
 
-                if (map.get("OprServiceGrp") instanceof Map)
-                    operator.putService(String.valueOf(((Map) map.get("OprServiceGrp")).get("name")), (Map<String, Object>) map.get("OprServiceGrp"));
-                else if (map.get("OprServiceGrp") instanceof List)
-                    ((List) map.get("OprServiceGrp")).stream()
-                            .forEach((serviceObj) -> operator.putService(String.valueOf(((Map) serviceObj).get("name")), ((Map) serviceObj))                );
+                if (map.has("OprServiceGrp"))
+                {
+                    if (map.get("OprServiceGrp") instanceof JSONObject)
+                        operator.putService(map.getJSONObject("OprServiceGrp").getString("name"), map.getJSONObject("OprServiceGrp"));
+                    else if (map.get("OprServiceGrp") instanceof JSONArray)
+                        map.getJSONArray("OprServiceGrp").forEach((serviceObj) -> operator.putService(((JSONObject)serviceObj).getString("name"), (JSONObject) serviceObj));
+                }
             }
         }
         catch (Exception e) { NRODClient.printThrowable(e, "RTPPM"); }
@@ -152,7 +157,7 @@ public class RTPPMHandler implements NRODListener
         StompConnectionHandler.lastMessageTimeGeneral = lastMessageTime;
         StompConnectionHandler.ack(headers.get("ack"));
 
-        Map<String, Map<String, Object>> ppmData = new HashMap<>(getPPMData());
+        JSONObject ppmData = getPPMData();
 
         //<editor-fold defaultstate="collapsed" desc="Print out">
         //List<String> operatorNames = new ArrayList<>(operators.keySet());
@@ -167,81 +172,25 @@ public class RTPPMHandler implements NRODListener
         //<editor-fold defaultstate="collapsed" desc="JSON file">
         try
         {
-            File saveFile = new File(NRODClient.EASMStorageDir, "RTPPM.json");
+            File saveFile = new File(NRODClient.EASM_STORAGE_DIR, "RTPPM.json");
             if (!saveFile.exists())
             {
                 saveFile.getParentFile().mkdirs();
                 saveFile.createNewFile();
             }
 
-            StringBuilder sb = new StringBuilder();
-            sb.append("\"RTPPMData\":{");
-
-            ppmData.entrySet().stream().forEach((operator) ->
-            {
-                StringBuilder sb2 = new StringBuilder();
-                operator.getValue().entrySet().stream().forEach(operatorInfo ->
-                {
-                    sb2.append('"').append(operatorInfo.getKey()).append("\":");
-                    if (operatorInfo.getValue() instanceof Map)
-                    {
-                        sb2.append('{');
-                        ((Map<String, Map<String, Object>>) operatorInfo.getValue()).entrySet().stream().forEach((serviceRoute) ->
-                        {
-                            sb2.append('"').append(serviceRoute.getKey()).append('"').append(':').append('{');
-                            serviceRoute.getValue().entrySet().stream().forEach((breakdown) ->
-                            {
-                                sb2.append('"').append(breakdown.getKey()).append('"').append(':');
-                                if (breakdown.getValue() instanceof Integer)
-                                    sb2.append(breakdown.getValue());
-                                else if (breakdown.getValue() instanceof Map)
-                                {
-                                    sb2.append('{');
-                                    ((Map<String, String>) breakdown.getValue()).entrySet().stream().forEach((ppmDisplayInfo) ->
-                                    {
-                                        sb2.append('"').append(ppmDisplayInfo.getKey()).append('"').append(':');
-                                        sb2.append('"').append(ppmDisplayInfo.getValue()).append('"').append(',');
-                                    });
-                                    if (sb2.charAt(sb2.length()-1) == ',')
-                                        sb2.deleteCharAt(sb2.length()-1);
-                                    sb2.append('}');
-                                }
-                                else
-                                    sb2.append('"').append(breakdown.getValue()).append('"');
-
-                                sb2.append(',');
-                            });
-                            if (sb2.charAt(sb2.length()-1) == ',')
-                                sb2.deleteCharAt(sb2.length()-1);
-                            sb2.append('}').append(',');
-                        });
-
-                        if (sb2.charAt(sb2.length()-1) == ',')
-                            sb2.deleteCharAt(sb2.length()-1);
-                        sb2.append('}');
-                    }
-                    else if (operatorInfo.getValue() instanceof String)
-                        sb2.append('"').append(operatorInfo.getValue()).append('"');
-                    else if (operatorInfo.getValue() instanceof Integer)
-                        sb2.append(operatorInfo.getValue());
-
-                    sb2.append(',');
-                });
-                sb.append('"').append(operator.getKey()).append("\":{").append(sb2.toString().substring(0, sb2.length()-1)).append("},");
-            });
-            if (sb.charAt(sb.length()-1) == ',')
-                sb.deleteCharAt(sb.length()-1);
-            sb.append('}');
+            JSONObject RTPPMData = new JSONObject();
+            RTPPMData.put("RTPPMData", ppmData);
 
             if (incidentMessages.trim().equals("null") || incidentMessages.trim().equals(""))
                 incidentMessages = "No messages";
 
-            sb.append(",\"IncidentMessages\":\"").append(incidentMessages).append("\",");
-            sb.append("\"timestamp\":").append(timestamp.getTime());
+            RTPPMData.put("IncidentMessages", incidentMessages);
+            RTPPMData.put("timestamp", timestamp.getTime());
 
             try (BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(saveFile))))
             {
-                bw.write(sb.toString());
+                bw.write(RTPPMData.toString());
             }
 
             printRTPPM("Saved json file (" + (saveFile.length() / 1024L) + "kb)", false);
@@ -266,13 +215,13 @@ public class RTPPMHandler implements NRODListener
         html.append("<body>");
         html.append("<div class=\"ppmMain\">");
         html.append("<p id=\"title\"><abbr title=\"Real-Time (at 15 min intervals) Public Performance Measure\">Real-Time PPM</abbr>&nbsp;<span class=\"small\">(")
-                .append(NRODClient.sdfDateTimeShort.format(new Date(timestamp.getTime() - (TimeZone.getDefault().inDaylightTime(new Date()) ? 3600000 : 0)))) // Time fix
+                .append(NRODClient.sdfDateTimeShort.format(new Date(timestamp.getTime() - (TimeZone.getDefault().inDaylightTime(timestamp) ? 3600000 : 0)))) // Time fix
                 .append(")</span></p>");
 
         String[] keys = operators.keySet().toArray(new String[0]);
         Arrays.sort(keys, String.CASE_INSENSITIVE_ORDER);
         for (String key : keys)
-            html.append(operators.get(key).htmlString()).append("");
+            html.append(operators.get(key).htmlString());
 
         html.append("<div id=\"ppmIncidents\">");
         html.append("<p><b>Incident Messages:</b></p>");
@@ -286,8 +235,8 @@ public class RTPPMHandler implements NRODListener
         html.append("(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){(i[r].q=i[r].q||[]).push(arguments)},i[r].l=Date.now();a=s.createElement(o),m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)})(window,document,'script','//www.google-analytics.com/analytics.js','ga');");
         html.append("ga('create', 'UA-72821900-1', 'auto');");
         html.append("ga('send', 'pageview');");
-        html.append("google_ad_type = \"image\";");
-        html.append("document.write('<p class=\"panelContainer\"><script src=\"http://en.ad.altervista.org/js2.ad/size=728X90/?ref='+encodeURIComponent(location.hostname+location.pathname)+'&r='+Date.now()+'\"><\\/script><\\/p>');");
+      //html.append("google_ad_type = \"image\";");
+      //html.append("document.write('<p class=\"panelContainer\"><script src=\"http://en.ad.altervista.org/js2.ad/size=728X90/?ref='+encodeURIComponent(location.hostname+location.pathname)+'&r='+Date.now()+'\"><\\/script><\\/p>');");
       //html.append("$('html,body').animate({ scrollTop: 0 }, 500);");
         html.append("setInterval(function() { location.reload(true) }, 120000);");
         html.append("</script>");
@@ -296,7 +245,7 @@ public class RTPPMHandler implements NRODListener
 
         try
         {
-            File htmlFile = new File(NRODClient.EASMStorageDir, "ppm.php");
+            File htmlFile = new File(NRODClient.EASM_STORAGE_DIR, "ppm.php");
             if (!htmlFile.exists())
             {
                 htmlFile.getParentFile().mkdirs();
@@ -323,13 +272,13 @@ public class RTPPMHandler implements NRODListener
             Calendar cal = Calendar.getInstance();
             cal.add(Calendar.DATE, -1);
 
-            File file = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "RTPPM" + File.separator + NRODClient.sdfDate.format(cal.getTime()).replace("/", "-") + "-final.json");
+            File file = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "RTPPM" + File.separator + NRODClient.sdfDate.format(cal.getTime()).replace("/", "-") + "-final.json");
             file.getParentFile().mkdirs();
             file.createNewFile();
 
             logStream.close();
 
-            logFile = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "RTPPM" + File.separator + NRODClient.sdfDate.format(new Date()).replace("/", "-") + ".log");
+            logFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "RTPPM" + File.separator + NRODClient.sdfDate.format(new Date()).replace("/", "-") + ".log");
             logFile.getParentFile().mkdirs();
 
             try
@@ -353,7 +302,7 @@ public class RTPPMHandler implements NRODListener
     {
         public  final String NAME;
         public  final int    CODE;
-        private       Map<String, Map<String, Object>> serviceMap = new HashMap<>();
+        private       JSONObject serviceMap = new JSONObject();
         private       String keySymbol = "";
 
         public Operator(String name, int code)
@@ -366,25 +315,25 @@ public class RTPPMHandler implements NRODListener
 
         public String getKeySymbol() { return keySymbol; }
 
-        public void putService(String serviceName, Map<String, Object> fullIndividualServiceMap)
+        public void putService(String serviceName, JSONObject fullIndividualServiceMap)
         {
-            Map<String, Object> trimmedServiceMap = new HashMap<>();
-            if (serviceMap.containsKey(serviceName))
-                trimmedServiceMap = serviceMap.get(serviceName);
+            JSONObject trimmedServiceMap = new JSONObject();
+            if (serviceMap.has(serviceName))
+                trimmedServiceMap = serviceMap.getJSONObject(serviceName);
 
-            keySymbol = String.valueOf(fullIndividualServiceMap.getOrDefault("keySymbol", ""));
+            keySymbol = fullIndividualServiceMap.optString("keySymbol");
 
-            int casl = Integer.parseInt((String) fullIndividualServiceMap.get("CancelVeryLate"));
-            int late = Integer.parseInt((String) fullIndividualServiceMap.get("Late")) - casl;
-
+            int casl = Integer.parseInt(fullIndividualServiceMap.getString("CancelVeryLate"));
+            int late = Integer.parseInt(fullIndividualServiceMap.getString("Late")) - casl;
+            
             trimmedServiceMap.put("CancelVeryLate", Integer.toString(casl));
             trimmedServiceMap.put("Late",           Integer.toString(late));
-            trimmedServiceMap.put("OnTime",         (String) fullIndividualServiceMap.get("OnTime"));
-            trimmedServiceMap.put("Total",          (String) fullIndividualServiceMap.get("Total"));
-            trimmedServiceMap.put("PPM",            (Map)    fullIndividualServiceMap.get("PPM"));
-            trimmedServiceMap.put("RollingPPM",     (Map)    fullIndividualServiceMap.get("RollingPPM"));
-            trimmedServiceMap.put("Timeband",       (String) fullIndividualServiceMap.getOrDefault("timeband", keySymbol.replace("*", "10").replace("^", "5")));
-            trimmedServiceMap.put("SectorCode",     (String) fullIndividualServiceMap.get("sectorCode"));
+            trimmedServiceMap.put("OnTime",         fullIndividualServiceMap.getString("OnTime"));
+            trimmedServiceMap.put("Total",          fullIndividualServiceMap.getString("Total"));
+            trimmedServiceMap.put("PPM",            fullIndividualServiceMap.getJSONObject("PPM"));
+            trimmedServiceMap.put("RollingPPM",     fullIndividualServiceMap.getJSONObject("RollingPPM"));
+            trimmedServiceMap.put("Timeband",       fullIndividualServiceMap.optString("timeband", keySymbol.replace("*", "10").replace("^", "5")));
+            trimmedServiceMap.put("SectorCode",     fullIndividualServiceMap.optString("sectorCode"));
 
             serviceMap.put(serviceName, trimmedServiceMap);
         }
@@ -409,29 +358,29 @@ public class RTPPMHandler implements NRODListener
                 if (serviceName.equals("Total"))
                     continue;
 
-                Map<String, Object> map = serviceMap.get(serviceName);
+                JSONObject map = serviceMap.optJSONObject(serviceName);
                 if (map != null)
                 {
                     StringBuilder sb = new StringBuilder("  ");
                     sb.append(lengthen(serviceName + ": ", length));
 
-                    String ppm = String.valueOf(((Map) map.get("PPM")).get("text"));
+                    String ppm = map.getJSONObject("PPM").getString("text");
                     if (!ppm.equals("-1"))
                         sb.append(lengthen(ppm + "%, ", 6));
                     else
                     {
-                        try { sb.append(lengthen((map.get("Total").equals("0") ? "0" : (100 * ((Integer) Integer.parseInt((String) map.get("OnTime")) / Integer.parseInt((String) map.get("Total"))))) + "?, ", 6)); }
+                        try { sb.append(lengthen((map.getString("Total").equals("0") ? "0" : (100 * (Integer.parseInt(map.getString("OnTime")) / Integer.parseInt(map.getString("Total"))))) + "?, ", 6)); }
                         catch (NumberFormatException | ArithmeticException e) { sb.append("N/A,  ");  }
                     }
 
-                    sb.append(lengthen(String.valueOf(map.get("Total"))          + ",  ", 7));
-                    sb.append(lengthen(String.valueOf(map.get("OnTime"))         + ", ",  6));
-                    sb.append(lengthen(String.valueOf(map.get("Late"))           + ", ",  6));
-                    sb.append(lengthen(String.valueOf(map.get("CancelVeryLate")) + ", ",  6));
+                    sb.append(lengthen(map.getString("Total")          + ",  ", 7));
+                    sb.append(lengthen(map.getString("OnTime")         + ", ",  6));
+                    sb.append(lengthen(map.getString("Late")           + ", ",  6));
+                    sb.append(lengthen(map.getString("CancelVeryLate") + ", ",  6));
 
-                    String rPPM = String.valueOf(((Map) map.get("RollingPPM")).get("text"));
+                    String rPPM = map.getJSONObject("RollingPPM").getString("text");
                     if (!rPPM.equals("-1"))
-                        sb.append(lengthen(rPPM + "% ", 5)).append(getTrendArrow(String.valueOf(((Map) map.get("RollingPPM")).get("trendInd"))));
+                        sb.append(lengthen(rPPM + "% ", 5)).append(getTrendArrow(map.getJSONObject("RollingPPM").getString("trendInd")));
                     else
                         sb.append("0%   ").append(getTrendArrow("="));
 
@@ -439,83 +388,36 @@ public class RTPPMHandler implements NRODListener
                 }
             }
 
-            Map<String, Object> map = serviceMap.get("Total");
+            JSONObject map = serviceMap.optJSONObject("Total");
             if (map != null)
             {
                 StringBuilder sb = new StringBuilder("  ");
                 sb.append(lengthen("Total: ", length));
 
-                String ppm = String.valueOf(((Map) map.get("PPM")).get("text"));
+                String ppm = map.getJSONObject("PPM").getString("text");
                 if (!ppm.equals("-1"))
                     sb.append(lengthen(ppm + "%, ", 6));
-                else if (!map.get("Total").equals("0"))
+                else if (!map.getString("Total").equals("0"))
                 {
-                    try { sb.append(lengthen((100 * ((Integer) Integer.parseInt((String) map.get("OnTime")) / Integer.parseInt((String) map.get("Total")))) + "?, ", 6)); }
+                    try { sb.append(lengthen((100 * ((Integer) Integer.parseInt(map.getString("OnTime")) / Integer.parseInt(map.getString("Total")))) + "?, ", 6)); }
                     catch (NumberFormatException | ArithmeticException e) { sb.append("N/A,  ");  }
                 }
                 else
                     sb.append("0?,   ");
 
-                sb.append(lengthen(String.valueOf(map.get("Total"))          + ",  ", 7));
-                sb.append(lengthen(String.valueOf(map.get("OnTime"))         + ", ",  6));
-                sb.append(lengthen(String.valueOf(map.get("Late"))           + ", ",  6));
-                sb.append(lengthen(String.valueOf(map.get("CancelVeryLate")) + ", ",  6));
+                sb.append(lengthen(map.getString("Total")          + ",  ", 7));
+                sb.append(lengthen(map.getString("OnTime")         + ", ",  6));
+                sb.append(lengthen(map.getString("Late")           + ", ",  6));
+                sb.append(lengthen(map.getString("CancelVeryLate") + ", ",  6));
 
-                String rPPM = String.valueOf(((Map) map.get("RollingPPM")).get("text"));
+                String rPPM = map.getJSONObject("RollingPPM").getString("text");
                 if (!rPPM.equals("-1"))
-                    sb.append(lengthen(rPPM + "% ", 5)).append(getTrendArrow(String.valueOf(((Map) map.get("RollingPPM")).get("trendInd"))));
+                    sb.append(lengthen(rPPM + "% ", 5)).append(getTrendArrow(map.getJSONObject("RollingPPM").getString("trendInd")));
                 else
                     sb.append("0%   ").append(getTrendArrow("="));
 
                 printRTPPM(sb.toString(), false);
             }
-
-            //<editor-fold defaultstate="collapsed" desc="Old prettyString">
-            /*String formattedMap  = "    Name: " + NAME + " (" + CODE + ")";
-                   formattedMap += "\n    Services:";
-
-            String[] keys = serviceMap.keySet().toArray(new String[0]);
-            Arrays.sort(keys);
-
-            int length = 0;
-            for (String key : keys)
-                if (key.length() > length)
-                    length = key.length();
-
-            for (String serviceName : serviceNames)
-            {
-                if (serviceName.equals("Total"))
-                    continue;
-
-                Map<String, Object> map = serviceMap.get(serviceName);
-                if (map != null)
-                {
-                    formattedMap += "\n      " + lengthen(serviceName + ": ", length + 2);
-
-                    formattedMap += "PPM: " + lengthen(((Map) map.get("PPM")).get("text") + "%, ", 6);
-                    if (!String.valueOf(((Map) map.get("RollingPPM")).get("text")).equals("-1"))
-                        formattedMap += "Rolling PPM: " + lengthen(((Map) map.get("RollingPPM")).get("text") + "%", 4) + " (" + String.valueOf(((Map) map.get("RollingPPM")).get("trendInd")) + "), ";
-                    else
-                        formattedMap += "Rolling PPM: --------, ";
-                    formattedMap += "(Total: " + lengthen(String.valueOf(map.get("Total")) + ",", 5) + " On Time: " + lengthen(String.valueOf(map.get("OnTime")) + ",", 5) + " Late: " + lengthen(String.valueOf(map.get("Late")) + ",", 4) + " Very Late/Cancelled: " + String.valueOf(map.get("CancelVeryLate")) + ")";
-                }
-            }
-
-            Map<String, Object> map = serviceMap.get("Total");
-            if (map != null)
-            {
-                formattedMap += "\n      " + lengthen("Total: ", length + 2);
-
-                formattedMap += "PPM: " + lengthen(((Map) map.get("PPM")).get("text") + "%, ", 6);
-                if (!String.valueOf(((Map) map.get("RollingPPM")).get("text")).equals("-1"))
-                    formattedMap += "Rolling PPM: " + lengthen(((Map) map.get("RollingPPM")).get("text") + "%", 4) + " (" + String.valueOf(((Map) map.get("RollingPPM")).get("trendInd")) + "), ";
-                else
-                    formattedMap += "Rolling PPM: --------, ";
-                formattedMap += "(Total: " + lengthen(String.valueOf(map.get("Total")) + ",", 5) + " On Time: " + lengthen(String.valueOf(map.get("OnTime")) + ",", 5) + " Late: " + lengthen(String.valueOf(map.get("Late")) + ",", 4) + " Very Late/Cancelled: " + String.valueOf(map.get("CancelVeryLate")) + ")";
-            }
-
-            return formattedMap;*/
-            //</editor-fold>
         }
 
         public String htmlString()
@@ -550,32 +452,32 @@ public class RTPPMHandler implements NRODListener
 
                 sb.append("<tr>");
 
-                Map<String, Object> map = serviceMap.get(key);
+                JSONObject map = serviceMap.optJSONObject(key);
                 if (map != null)
                 {
                     sb.append("<td class=\"ppmTable\">").append(key.replace("&", "&amp;")).append("</td>");
 
-                    String ppm = String.valueOf(((Map) map.get("PPM")).get("text"));
+                    String ppm = map.getJSONObject("PPM").getString("text");
                     if (!ppm.equals("-1"))
-                        sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("PPM")).get("rag")))).append("\">").append(ppm).append("%</td>");
+                        sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(map.getJSONObject("PPM").getString("rag"))).append("\">").append(ppm).append("%</td>");
                     else
                     {
-                        sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("PPM")).get("rag")))).append("\">");
-                        try { sb.append("<abbr title=\"guess\">").append(100 * ((Integer) Integer.parseInt((String) map.get("OnTime")) / Integer.parseInt((String) map.get("Total")))).append("%</abbr>"); }
+                        sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(map.getJSONObject("PPM").getString("rag"))).append("\">");
+                        try { sb.append("<abbr title=\"guess\">").append(100 * (Integer.parseInt(map.getString("OnTime")) / Integer.parseInt(map.getString("Total")))).append("%</abbr>"); }
                         catch (NumberFormatException | ArithmeticException e) { sb.append("N/A"); }
                         sb.append("</td>");
                     }
 
-                    sb.append("<td class=\"ppmTable\">").append(map.get("Total")).append("</td>");
-                    sb.append("<td class=\"ppmTable\">").append(map.get("OnTime")).append("</td>");
-                    sb.append("<td class=\"ppmTable\">").append(map.get("Late")).append("</td>");
-                    sb.append("<td class=\"ppmTable\">").append(map.get("CancelVeryLate")).append("</td>");
+                    sb.append("<td class=\"ppmTable\">").append(map.getString("Total")).append("</td>");
+                    sb.append("<td class=\"ppmTable\">").append(map.getString("OnTime")).append("</td>");
+                    sb.append("<td class=\"ppmTable\">").append(map.getString("Late")).append("</td>");
+                    sb.append("<td class=\"ppmTable\">").append(map.getString("CancelVeryLate")).append("</td>");
 
-                    String rollPPM = String.valueOf(((Map) map.get("RollingPPM")).get("text"));
+                    String rollPPM = map.getJSONObject("RollingPPM").getString("text");
                     if (!rollPPM.equals("-1"))
                     {
-                        sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("RollingPPM")).get("rag")))).append("\">").append(rollPPM).append("%").append("</td>");
-                        sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(getTrendArrow(String.valueOf(((Map) map.get("RollingPPM")).get("trendInd"))))).append("\">").append(getTrendArrow(String.valueOf(((Map) map.get("RollingPPM")).get("trendInd")))).append("</td>");
+                        sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(map.getJSONObject("RollingPPM").getString("rag"))).append("\">").append(rollPPM).append("%").append("</td>");
+                        sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(getTrendArrow(map.getJSONObject("RollingPPM").getString("trendInd")))).append("\">").append(getTrendArrow(map.getJSONObject("RollingPPM").getString("trendInd"))).append("</td>");
                     }
                     else
                     {
@@ -588,24 +490,24 @@ public class RTPPMHandler implements NRODListener
                 sb.append("</tr>");
             }
 
-            Map<String, Object> map = serviceMap.get("Total");
+            JSONObject map = serviceMap.optJSONObject("Total");
             if (map != null)
             {
                 sb.append("<tr>");
 
                 sb.append("<td class=\"ppmTable\">Total</td>");
-                sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("PPM")).get("rag")))).append("\">").append(((Map) map.get("PPM")).get("text")).append("%").append("</td>");
+                sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(map.getJSONObject("PPM").getString("rag"))).append("\">").append(map.getJSONObject("PPM").getString("text")).append("%").append("</td>");
 
-                sb.append("<td class=\"ppmTable\">").append(map.get("Total")).append("</td>");
-                sb.append("<td class=\"ppmTable\">").append(map.get("OnTime")).append("</td>");
-                sb.append("<td class=\"ppmTable\">").append(map.get("Late")).append("</td>");
-                sb.append("<td class=\"ppmTable\">").append(map.get("CancelVeryLate")).append("</td>");
+                sb.append("<td class=\"ppmTable\">").append(map.getString("Total")).append("</td>");
+                sb.append("<td class=\"ppmTable\">").append(map.getString("OnTime")).append("</td>");
+                sb.append("<td class=\"ppmTable\">").append(map.getString("Late")).append("</td>");
+                sb.append("<td class=\"ppmTable\">").append(map.getString("CancelVeryLate")).append("</td>");
 
-                String rollPPM = String.valueOf(((Map) map.get("RollingPPM")).get("text"));
+                String rollPPM = map.getJSONObject("RollingPPM").getString("text");
                 if (!rollPPM.equals("-1"))
                 {
-                    sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("RollingPPM")).get("rag")))).append("\">").append(rollPPM).append("%").append("</td>");
-                    sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(String.valueOf(((Map) map.get("RollingPPM")).get("rag")))).append("\">").append(getTrendArrow(String.valueOf(((Map) map.get("RollingPPM")).get("trendInd")))).append("</td>");
+                    sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(map.getJSONObject("RollingPPM").getString("rag"))).append("\">").append(rollPPM).append("%").append("</td>");
+                    sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(map.getJSONObject("RollingPPM").getString("rag"))).append("\">").append(getTrendArrow(map.getJSONObject("RollingPPM").getString("trendInd"))).append("</td>");
                 }
                 else
                 {
@@ -621,9 +523,9 @@ public class RTPPMHandler implements NRODListener
             return sb.toString().replace("▲", "&#x25B2;").replace("▬", "&#9644;").replace("▼", "&#x25BC;");
         }
 
-        public Map<String, Object> getMap()
+        public JSONObject getMap()
         {
-            Map<String, Object> map = new HashMap<>();
+            JSONObject map = new JSONObject();
 
             map.put("name",       NAME);
             map.put("code",       CODE);
@@ -633,10 +535,10 @@ public class RTPPMHandler implements NRODListener
             return map;
         }
 
-        public void readMap(Map<String, Object> map)
+        public void readMap(JSONObject map)
         {
-            if (map.containsKey("keySymbol")  && map.get("keySymbol")  != null) keySymbol  = (String) map.get("keySymbol");
-            if (map.containsKey("serviceMap") && map.get("serviceMap") != null) serviceMap = (Map<String, Map<String, Object>>) map.get("serviceMap");
+            if (map.has("keySymbol")  && map.opt("keySymbol")  != null) keySymbol  = map.getString("keySymbol");
+            if (map.has("serviceMap") && map.opt("serviceMap") != null) serviceMap = map.getJSONObject("serviceMap");
         }
 
         private String getTrendArrow(String trendChar)
@@ -677,8 +579,12 @@ public class RTPPMHandler implements NRODListener
 
         private String lengthen(String string, int length)
         {
+            return lengthen(string, length, ' ');
+        }
+        private String lengthen(String string, int length, char spacer)
+        {
             while (string.length() < length)
-                string += " ";
+                string += spacer;
 
             return string.substring(0, length);
         }
@@ -747,24 +653,24 @@ public class RTPPMHandler implements NRODListener
         }
     }*/
 
-    public static Map<String, Map<String, Object>> getPPMData()
+    public static JSONObject getPPMData()
     {
-        Map<String, Map<String, Object>> map = new HashMap<>();
+        JSONObject obj = new JSONObject();
 
-        operators.entrySet().parallelStream().forEach((pairs) -> map.put(pairs.getKey(), pairs.getValue().getMap()));
+        operators.entrySet().parallelStream().forEach((pairs) -> obj.put(pairs.getKey(), pairs.getValue().getMap()));
 
-        return map;
+        return obj;
     }
 
-    public static void readData(Map<String, Map<String, Object>> dataMap)
+    public static void readData(JSONObject dataMap)
     {
-        dataMap.entrySet().stream().forEach((pairs) ->
+        for (String key : dataMap.keySet())
         {
-            if (!operators.containsKey(pairs.getKey()))
-                operators.put(pairs.getKey(), new Operator((String) pairs.getValue().get("name"), (int) ((long) pairs.getValue().get("code"))));
+            if (!operators.containsKey(key))
+                operators.put(key, new Operator(dataMap.getJSONObject(key).getString("name"), dataMap.getJSONObject(key).getInt("code")));
 
-            operators.get(pairs.getKey()).readMap(pairs.getValue());
-        });
+            operators.get(key).readMap(dataMap.getJSONObject(key));
+        }
     }
 
     public static void uploadHTML()
@@ -773,7 +679,7 @@ public class RTPPMHandler implements NRODListener
         {
             try
             {
-                File htmlFile = new File(NRODClient.EASMStorageDir, "ppm.php");
+                File htmlFile = new File(NRODClient.EASM_STORAGE_DIR, "ppm.php");
                 if (htmlFile.exists())
                 {
                     String html = "<html>Upload failed</html>";
@@ -787,7 +693,7 @@ public class RTPPMHandler implements NRODListener
                     catch (FileNotFoundException e) {}
                     catch (IOException e) {}
 
-                    URLConnection con = new URL(NRODClient.ftpBaseUrl + "PPM/index.php;type=i").openConnection();
+                    URLConnection con = new URL(NRODClient.ftpBaseUrl + "/PPM/index.php;type=i").openConnection();
                     con.setConnectTimeout(10000);
                     con.setReadTimeout(10000);
                     try (BufferedWriter out = new BufferedWriter(new OutputStreamWriter(con.getOutputStream())))
@@ -798,7 +704,7 @@ public class RTPPMHandler implements NRODListener
                         printRTPPM("Uploaded HTML", false);
                     }
                     catch (SocketTimeoutException e) { printRTPPM("HTML upload Timeout", true); }
-                    catch (IOException e) {}
+                    catch (IOException e) { printRTPPM("Exception during HTML Upload", true); }
                 }
             }
             catch (MalformedURLException e) {}

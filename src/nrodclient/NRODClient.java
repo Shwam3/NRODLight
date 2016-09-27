@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.lang.management.ManagementFactory;
 import java.lang.reflect.InvocationTargetException;
+import java.security.GeneralSecurityException;
 import java.text.SimpleDateFormat;
 import java.util.Collection;
 import java.util.Collections;
@@ -48,12 +49,12 @@ import org.json.JSONObject;
 
 public class NRODClient
 {
-    public static final String VERSION;
+    public static final String VERSION = "1";
 
     public  static final boolean verbose = false;
     public  static boolean stop = true;
 
-    public static final File EASMStorageDir = new File(System.getProperty("user.home", "C:") + File.separator + ".easigmap");
+    public static final File EASM_STORAGE_DIR = new File(System.getProperty("user.home", "C:") + File.separator + ".easigmap");
 
     public static SimpleDateFormat sdfTime          = new SimpleDateFormat("HH:mm:ss");
     public static SimpleDateFormat sdfDate          = new SimpleDateFormat("dd/MM/yy");
@@ -69,19 +70,21 @@ public class NRODClient
     private static boolean  trayIconAdded = false;
     private static TrayIcon sysTrayIcon = null;
     
-    public  static final int     port;
+    public  static final int     port = 6322;
     public  static EASMWebSocket webSocket;
+    public  static final int     portSSL = 6323;
+    public  static EASMWebSocket webSocketSSL;
     public  static DataGui       guiData;
 
     public static PrintStream stdOut = System.out;
     public static PrintStream stdErr = System.err;
     
-    static
+    /*static
     {
         String ver = "1";
         int prt = 6322;
         
-        /*File versionFile = new File(EASMStorageDir, "NROD_Version.properties");
+        File versionFile = new File(EASMStorageDir, "NROD_Version.properties");
         try
         {
             //if (versionFile.exists())
@@ -97,19 +100,19 @@ public class NRODClient
             //    prt += 2;
             //}
         }
-        catch (IOException ex) { ex.printStackTrace(); }*/
+        catch (IOException ex) { ex.printStackTrace(); }
         
         VERSION = ver;
         port = prt;
-    }
+    }*/
 
-    public static void main(String[] args)
+    public static void main(String[] args) throws IOException, GeneralSecurityException
     {
         try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()); }
         catch (ClassNotFoundException | InstantiationException | IllegalAccessException | UnsupportedLookAndFeelException e) { printThrowable(e, "Look & Feel"); }
 
         Date logDate = new Date();
-        logFile = new File(EASMStorageDir, "Logs" + File.separator + "NRODClient" + File.separator + sdfDate.format(logDate).replace("/", "-") + ".log");
+        logFile = new File(EASM_STORAGE_DIR, "Logs" + File.separator + "NRODClient" + File.separator + sdfDate.format(logDate).replace("/", "-") + ".log");
         logFile.getParentFile().mkdirs();
         lastLogDate = sdfDate.format(logDate);
 
@@ -123,13 +126,13 @@ public class NRODClient
 
         try
         {
-            File ftpLoginFile = new File(EASMStorageDir, "Website_FTP_Login.properties");
+            File ftpLoginFile = new File(EASM_STORAGE_DIR, "Website_FTP_Login.properties");
             if (ftpLoginFile.exists())
             {
                 Properties ftpLogin = new Properties();
                 ftpLogin.load(new FileInputStream(ftpLoginFile));
 
-                ftpBaseUrl = "ftp://" + ftpLogin.getProperty("Username", "") + ":" + ftpLogin.getProperty("Password", "") + "@ftp.easignalmap.altervista.org/";
+                ftpBaseUrl = "ftp://" + ftpLogin.getProperty("Username", "") + ":" + ftpLogin.getProperty("Password", "") + "@" + ftpLogin.getOrDefault("URL", "");
             }
         }
         catch (FileNotFoundException e) {}
@@ -143,8 +146,10 @@ public class NRODClient
         else
             StompConnectionHandler.printStomp("Unble to start", true);
         
-        webSocket = new EASMWebSocket(port);
+        webSocket = new EASMWebSocket(port, false);
         webSocket.start();
+        webSocketSSL = new EASMWebSocket(portSSL, true);
+        webSocketSSL.start();
 
         Timer sleepTimer = new Timer("sleepTimer", true);
         sleepTimer.scheduleAtFixedRate(new TimerTask()
@@ -161,6 +166,27 @@ public class NRODClient
                 catch (Exception e) { printErr("[Timer] Exception: " + e.toString()); }
             }
         }, 30000, 30000);
+        /*Timer managementTimer = new Timer("managementTimer", true);
+        managementTimer.scheduleAtFixedRate(new TimerTask()
+        {
+            @Override
+            public void run()
+            {
+                try
+                {
+                    JSONObject managementContainer = new JSONObject();
+                    JSONObject management = new JSONObject();
+                    JSONArray connections = new JSONArray();
+                    NRODClient.webSocket.connections().stream().filter(c -> c != null).forEachOrdered(c -> connections.put(c.getRemoteSocketAddress().getAddress().getHostAddress() + ":" + c.getRemoteSocketAddress().getPort()));
+                    management.put("connections", connections);
+                    
+                    managementContainer.put("management", "");
+                    managementContainer.put("timestamp", System.currentTimeMillis());
+                }
+                catch (NullPointerException e) {}
+                catch (Exception e) { printErr("[Timer] Exception: " + e.toString()); }
+            }
+        }, 30000, 30000);*/
         Timer FullUpdateMessenger = new Timer("FullUpdateMessenger");
         FullUpdateMessenger.schedule(new TimerTask()
         {
@@ -178,6 +204,10 @@ public class NRODClient
                     String messageStr = message.toString();
 
                     webSocket.connections().stream()
+                        .filter(c -> c != null)
+                        .filter(c -> c.isOpen())
+                        .forEach(c -> c.send(messageStr));
+                    webSocketSSL.connections().stream()
                         .filter(c -> c != null)
                         .filter(c -> c.isOpen())
                         .forEach(c -> c.send(messageStr));
@@ -255,7 +285,7 @@ public class NRODClient
 
             lastLogDate = sdfDate.format(logDate);
 
-            logFile = new File(EASMStorageDir, "Logs" + File.separator + "NRODClient" + File.separator + lastLogDate.replace("/", "-") + ".log");
+            logFile = new File(EASM_STORAGE_DIR, "Logs" + File.separator + "NRODClient" + File.separator + lastLogDate.replace("/", "-") + ".log");
             logFile.getParentFile().mkdirs();
 
             try
@@ -300,10 +330,14 @@ public class NRODClient
                     NRODClient.updatePopupMenu();
                     
                     Collection<WebSocket> conns = Collections.unmodifiableCollection(NRODClient.webSocket.connections());
+                    Collection<WebSocket> connsSSL = Collections.unmodifiableCollection(NRODClient.webSocketSSL.connections());
                     StringBuilder statusMsg = new StringBuilder();
                     statusMsg.append("WebSocket:");
                     statusMsg.append("\n  Connections: ").append(conns.size());
-                    conns.stream().filter(c -> c != null).forEachOrdered(c -> statusMsg.append("\n    ").append(c.getRemoteSocketAddress().getAddress().getHostAddress()).append(":").append(c.getRemoteSocketAddress().getPort()));
+                    statusMsg.append("\n    Insecure: ").append(conns.size());
+                    conns.stream().filter(c -> c != null).forEachOrdered(c -> statusMsg.append("\n      ").append(c.getRemoteSocketAddress().getAddress().getHostAddress()).append(":").append(c.getRemoteSocketAddress().getPort()));
+                    statusMsg.append("\n    Secure: ").append(conns.size());
+                    connsSSL.stream().filter(c -> c != null).forEachOrdered(c -> statusMsg.append("\n      ").append(c.getRemoteSocketAddress().getAddress().getHostAddress()).append(":").append(c.getRemoteSocketAddress().getPort()));
                     statusMsg.append("\nStomp:");
                     statusMsg.append("\n  Connection: ").append(StompConnectionHandler.isConnected() ? "Connected" : "Disconnected").append(StompConnectionHandler.isTimedOut() ? " (timed out)" : "");
                     statusMsg.append("\n  Timeout: ").append((System.currentTimeMillis() - StompConnectionHandler.lastMessageTimeGeneral) / 1000f).append("s");

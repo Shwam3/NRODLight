@@ -29,7 +29,7 @@ public class RateMonitor implements NRODListener
     private RateMonitor()
     {
         Date logDate = new Date();
-        logFile = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "RateMonitor" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".csv");
+        logFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "RateMonitor" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".csv");
         boolean fileExisted = logFile.exists();
         logFile.getParentFile().mkdirs();
         lastLogDate = NRODClient.sdfDate.format(logDate);
@@ -62,7 +62,7 @@ public class RateMonitor implements NRODListener
             {
                 logStream.close();
 
-                logFile = new File(NRODClient.EASMStorageDir, "Logs" + File.separator + "RateMonitor" + File.separator + NRODClient.sdfDate.format(logDateNew).replace("/", "-") + ".csv");
+                logFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "RateMonitor" + File.separator + NRODClient.sdfDate.format(logDateNew).replace("/", "-") + ".csv");
                 logFile.getParentFile().mkdirs();
                 lastLogDate = NRODClient.sdfDate.format(logDateNew);
 
