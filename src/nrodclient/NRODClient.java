@@ -49,7 +49,7 @@ import org.json.JSONObject;
 
 public class NRODClient
 {
-    public static final String VERSION = "1";
+    public static final String VERSION = "2";
 
     public  static final boolean verbose = false;
     public  static boolean stop = true;
@@ -146,9 +146,10 @@ public class NRODClient
         else
             StompConnectionHandler.printStomp("Unble to start", true);
         
-        webSocket = new EASMWebSocket(port, false);
-        webSocket.start();
+        //webSocket = new EASMWebSocket(port, false);
         webSocketSSL = new EASMWebSocket(portSSL, true);
+        
+        //webSocket.start();
         webSocketSSL.start();
 
         Timer sleepTimer = new Timer("sleepTimer", true);
@@ -203,10 +204,10 @@ public class NRODClient
                     message.put("Message", content);
                     String messageStr = message.toString();
 
-                    webSocket.connections().stream()
-                        .filter(c -> c != null)
-                        .filter(c -> c.isOpen())
-                        .forEach(c -> c.send(messageStr));
+                    //webSocket.connections().stream()
+                    //    .filter(c -> c != null)
+                    //    .filter(c -> c.isOpen())
+                    //    .forEach(c -> c.send(messageStr));
                     webSocketSSL.connections().stream()
                         .filter(c -> c != null)
                         .filter(c -> c.isOpen())
@@ -329,14 +330,14 @@ public class NRODClient
                 {
                     NRODClient.updatePopupMenu();
                     
-                    Collection<WebSocket> conns = Collections.unmodifiableCollection(NRODClient.webSocket.connections());
+                    //Collection<WebSocket> conns = Collections.unmodifiableCollection(NRODClient.webSocket.connections());
                     Collection<WebSocket> connsSSL = Collections.unmodifiableCollection(NRODClient.webSocketSSL.connections());
                     StringBuilder statusMsg = new StringBuilder();
                     statusMsg.append("WebSocket:");
-                    statusMsg.append("\n  Connections: ").append(conns.size());
-                    statusMsg.append("\n    Insecure: ").append(conns.size());
-                    conns.stream().filter(c -> c != null).forEachOrdered(c -> statusMsg.append("\n      ").append(c.getRemoteSocketAddress().getAddress().getHostAddress()).append(":").append(c.getRemoteSocketAddress().getPort()));
-                    statusMsg.append("\n    Secure: ").append(conns.size());
+                    statusMsg.append("\n  Connections: ").append(/*conns.size() + */connsSSL.size());
+                    statusMsg.append("\n    Insecure: disabled")/*.append(conns.size())*/;
+                    //conns.stream().filter(c -> c != null).forEachOrdered(c -> statusMsg.append("\n      ").append(c.getRemoteSocketAddress().getAddress().getHostAddress()).append(":").append(c.getRemoteSocketAddress().getPort()));
+                    statusMsg.append("\n    Secure: ").append(connsSSL.size());
                     connsSSL.stream().filter(c -> c != null).forEachOrdered(c -> statusMsg.append("\n      ").append(c.getRemoteSocketAddress().getAddress().getHostAddress()).append(":").append(c.getRemoteSocketAddress().getPort()));
                     statusMsg.append("\nStomp:");
                     statusMsg.append("\n  Connection: ").append(StompConnectionHandler.isConnected() ? "Connected" : "Disconnected").append(StompConnectionHandler.isTimedOut() ? " (timed out)" : "");
@@ -375,7 +376,11 @@ public class NRODClient
                         TDHandler.DataMap.putAll(map);
 
                         String messageStr = container.toString();
-                        NRODClient.webSocket.connections().stream()
+                        //NRODClient.webSocket.connections().stream()
+                        //        .filter(c -> c != null)
+                        //        .filter(c -> c.isOpen())
+                        //        .forEach(c -> c.send(messageStr));
+                        NRODClient.webSocketSSL.connections().stream()
                                 .filter(c -> c != null)
                                 .filter(c -> c.isOpen())
                                 .forEach(c -> c.send(messageStr));

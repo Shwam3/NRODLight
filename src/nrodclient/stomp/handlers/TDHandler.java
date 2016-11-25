@@ -16,6 +16,7 @@ import java.util.Map;
 import nrodclient.NRODClient;
 import nrodclient.stomp.NRODListener;
 import nrodclient.stomp.StompConnectionHandler;
+import org.java_websocket.WebSocket;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -118,10 +119,12 @@ public class TDHandler implements NRODListener
 
             try (BufferedWriter bw = new BufferedWriter(new FileWriter(DataFileNew, false)))
             {
-                bw.write(DataMap.getOrDefault(key, ""));
+                String str = DataMap.getOrDefault(key, "");
+                bw.write(str);
                 bw.newLine();
             }
             catch (IOException ex) { NRODClient.printThrowable(ex, "TD"); }
+            catch (NullPointerException ex) { NRODClient.printThrowable(ex, "TD"); }
 
             if (DataFile.exists())
                 DataFileNew.delete();
@@ -271,24 +274,24 @@ public class TDHandler implements NRODListener
                         break;
                     }
                 }
-                NRODClient.guiData.updateData();
                 
-                JSONObject container = new JSONObject();
-                JSONObject message = new JSONObject();
-                message.put("type", "SEND_UPDATE");
-                message.put("timestamp", System.currentTimeMillis());
-                message.put("message", updateMap);
-                container.put("Message", message);
+                if (NRODClient.guiData != null && NRODClient.guiData.isVisible())
+                    NRODClient.guiData.updateData();
+                
+                if (NRODClient.webSocketSSL != null)
+                {
+                    JSONObject container = new JSONObject();
+                    JSONObject message = new JSONObject();
+                    message.put("type", "SEND_UPDATE");
+                    message.put("timestamp", System.currentTimeMillis());
+                    message.put("message", updateMap);
+                    container.put("Message", message);
 
-                String messageStr = container.toString();
-                NRODClient.webSocket.connections().stream()
-                        .filter(c -> c != null)
-                        .filter(c -> c.isOpen())
-                        .forEach(c -> c.send(messageStr));
-                NRODClient.webSocketSSL.connections().stream()
-                        .filter(c -> c != null)
-                        .filter(c -> c.isOpen())
-                        .forEach(c -> c.send(messageStr));
+                    String messageStr = container.toString();
+                    for (WebSocket ws : NRODClient.webSocketSSL.connections())
+                        if (ws != null && ws.isOpen())
+                            ws.send(messageStr);
+                }
             }
             catch (Exception e) { NRODClient.printThrowable(e, "TD"); }
         }
@@ -334,30 +337,16 @@ public class TDHandler implements NRODListener
             {
                 File DataFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TD"
                     + File.separator + "TDData" + File.separator + key.substring(0, 2) + File.separator + key.substring(2).replace(":", "-") + ".td");
-                File DataFileNew = new File(DataFile.getAbsoluteFile() + ".new");
                 
                 if (key.length() != 6)
                     return;
-                
-                try
-                {
-                    DataFileNew.getParentFile().mkdirs();
-                    if (DataFileNew.exists())
-                        DataFileNew.delete();
-                    DataFileNew.createNewFile();
-                }
-                catch (IOException ex) { NRODClient.printThrowable(ex, "TD"); }
-                
-                try (BufferedWriter bw = new BufferedWriter(new FileWriter(DataFileNew, false)))
+                                
+                try (BufferedWriter bw = new BufferedWriter(new FileWriter(DataFile, false)))
                 {
                     bw.write(updateMap.getOrDefault(key, ""));
                     bw.newLine();
                 }
                 catch (IOException ex) { NRODClient.printThrowable(ex, "TD"); }
-                
-                if (DataFile.exists())
-                    DataFile.delete();
-                DataFileNew.renameTo(DataFile);
             });
         }
         //</editor-fold>

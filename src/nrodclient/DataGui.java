@@ -173,6 +173,13 @@ public class DataGui extends JFrame
         listSClass.setModel(modelSClass);
     }
 
+    @Override
+    public void setVisible(boolean b)
+    {
+        super.setVisible(b);
+        updateData();
+    }
+
     private boolean elementFitsFilter(String element)
     {
         return element.toLowerCase().contains(filterString.toLowerCase());
