@@ -62,7 +62,7 @@ public class TDHandler implements NRODListener
                 JSONObject json = new JSONObject(jsonString).getJSONObject("TDData");
 
                 for (String key : json.keySet())
-                    DataMap.put(key, json.getString(key));
+                    DATA_MAP.put(key, json.getString(key));
             }
             catch (JSONException e) { NRODClient.printThrowable(e, "TD"); }
         }
@@ -94,12 +94,13 @@ public class TDHandler implements NRODListener
                     }
                     catch (IOException ex) { NRODClient.printThrowable(ex, "TD"); }
                     
-                    DataMap.put(area + dataID.substring(0, 4).replace("-", ":"), data);
+                    DATA_MAP.put(area + dataID.substring(0, 4).replace("-", ":"), data == null ? "" : data);
                 }
             }
         }
         
-        DataMap.keySet().stream().forEach(key ->
+        Map<String, String> dataMap = Collections.unmodifiableMap(new HashMap<>(DATA_MAP));
+        dataMap.keySet().stream().forEach(key ->
         {
             File DataFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TD"
                 + File.separator + "TDData" + File.separator + key.substring(0, 2) + File.separator + key.substring(2).replace(":", "-") + ".td");
@@ -119,8 +120,8 @@ public class TDHandler implements NRODListener
 
             try (BufferedWriter bw = new BufferedWriter(new FileWriter(DataFileNew, false)))
             {
-                String str = DataMap.getOrDefault(key, "");
-                bw.write(str);
+                String str = dataMap.getOrDefault(key, "");
+                bw.write(str == null ? "" : str);
                 bw.newLine();
             }
             catch (IOException ex) { NRODClient.printThrowable(ex, "TD"); }
@@ -141,7 +142,7 @@ public class TDHandler implements NRODListener
         return instance;
     }
 
-    public static Map<String, String> DataMap = new HashMap<>();
+    public static final Map<String, String> DATA_MAP = Collections.synchronizedMap(new HashMap<>());
 
     @Override
     public void message(Map<String, String> headers, String body)
@@ -170,8 +171,8 @@ public class TDHandler implements NRODListener
                     {
                         updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "");
                         updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"));
-                        DataMap.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "");
-                        DataMap.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"));
+                        DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "");
+                        DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"));
 
                         printTD(String.format("Step %s from %s to %s",
                                 indvMsg.getString("descr"),
@@ -185,7 +186,7 @@ public class TDHandler implements NRODListener
                     case "CB_MSG":
                     {
                         updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "");
-                        DataMap.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "");
+                        DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "");
 
                         printTD(String.format("Cancel %s from %s",
                                 indvMsg.getString("descr"),
@@ -198,7 +199,7 @@ public class TDHandler implements NRODListener
                     case "CC_MSG":
                     {
                         updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"));
-                        DataMap.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"));
+                        DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"));
 
                         printTD(String.format("Interpose %s to %s",
                                 indvMsg.getString("descr"),
@@ -211,7 +212,7 @@ public class TDHandler implements NRODListener
                     case "CT_MSG":
                     {
                         updateMap.put("XXHB" + indvMsg.getString("area_id"), indvMsg.getString("report_time"));
-                        DataMap.put("XXHB" + indvMsg.getString("area_id"), indvMsg.getString("report_time"));
+                        DATA_MAP.put("XXHB" + indvMsg.getString("area_id"), indvMsg.getString("report_time"));
 
                         printTD(String.format("Heartbeat from %s at time %s",
                                 indvMsg.getString("area_id"),
@@ -229,18 +230,18 @@ public class TDHandler implements NRODListener
                         {
                             String address = msgAddr + ":" + Integer.toString(8 - i);
 
-                            if (!DataMap.containsKey(address) || !DataMap.get(address).equals(String.valueOf(data[i])))
+                            if (!DATA_MAP.containsKey(address) || DATA_MAP.get(address) == null || !DATA_MAP.get(address).equals(String.valueOf(data[i])))
                             {
-                                if (!DataMap.getOrDefault(address, "0").equals(String.valueOf(data[i])))
+                                if (!DATA_MAP.getOrDefault(address, "0").equals(String.valueOf(data[i])))
                                     printTD(String.format("Change %s from %s to %s",
                                             address,
-                                            DataMap.getOrDefault(address, "0"),
+                                            DATA_MAP.getOrDefault(address, "0"),
                                             data[i]),
                                         false,
                                         Long.parseLong(indvMsg.getString("time")));
                             }
                             updateMap.put(address, String.valueOf(data[i]));
-                            DataMap.put(address, String.valueOf(data[i]));
+                            DATA_MAP.put(address, String.valueOf(data[i]));
                         }
                         break;
                     }
@@ -269,7 +270,7 @@ public class TDHandler implements NRODListener
                         for (int i = 0; i < data.length; i++)
                         {
                             updateMap.put(addresses[i], Integer.toString(data[i]));
-                            DataMap.put(addresses[i], Integer.toString(data[i]));
+                            DATA_MAP.put(addresses[i], Integer.toString(data[i]));
                         }
                         break;
                     }
@@ -392,7 +393,7 @@ public class TDHandler implements NRODListener
             catch (IOException e) { NRODClient.printThrowable(e, "TD"); }
 
             StringBuilder sb = new StringBuilder().append("{\"TDData\":{");
-            DataMap.entrySet().stream().filter(p -> p.getValue() != null).forEach(p -> sb.append("\r\n\"").append(p.getKey()).append("\":\"").append(p.getValue()).append("\","));
+            DATA_MAP.entrySet().stream().filter(p -> p.getValue() != null).forEach(p -> sb.append("\r\n\"").append(p.getKey()).append("\":\"").append(p.getValue()).append("\","));
 
             if (sb.charAt(sb.length()-1) == ',')
                 sb.deleteCharAt(sb.length()-1);

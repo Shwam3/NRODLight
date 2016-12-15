@@ -141,16 +141,18 @@ public class NRODClient
         try { EventQueue.invokeAndWait(() -> guiData = new DataGui()); }
         catch (InvocationTargetException | InterruptedException e) { printThrowable(e, "Startup"); }
         
+        new Thread(() -> {
+            //webSocket = new EASMWebSocket(port, false);
+            webSocketSSL = new EASMWebSocket(portSSL, true);
+
+            //webSocket.start();
+            webSocketSSL.start();
+        }).start();
+        
         if (StompConnectionHandler.wrappedConnect())
             StompConnectionHandler.printStomp("Initialised and working", false);
         else
             StompConnectionHandler.printStomp("Unble to start", true);
-        
-        //webSocket = new EASMWebSocket(port, false);
-        webSocketSSL = new EASMWebSocket(portSSL, true);
-        
-        //webSocket.start();
-        webSocketSSL.start();
 
         Timer sleepTimer = new Timer("sleepTimer", true);
         sleepTimer.scheduleAtFixedRate(new TimerTask()
@@ -200,7 +202,7 @@ public class NRODClient
                     JSONObject content = new JSONObject();
                     content.put("type", "SEND_ALL");
                     content.put("timestamp", Long.toString(System.currentTimeMillis()));
-                    content.put("message", new HashMap<>(TDHandler.DataMap));
+                    content.put("message", TDHandler.DATA_MAP);
                     message.put("Message", content);
                     String messageStr = message.toString();
 
@@ -373,7 +375,7 @@ public class NRODClient
                         message.put("timestamp", System.currentTimeMillis());
                         message.put("message", map);
                         container.put("Message", message);
-                        TDHandler.DataMap.putAll(map);
+                        TDHandler.DATA_MAP.putAll(map);
 
                         String messageStr = container.toString();
                         //NRODClient.webSocket.connections().stream()

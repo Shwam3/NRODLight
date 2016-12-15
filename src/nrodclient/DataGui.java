@@ -9,6 +9,7 @@ import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.io.IOException;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import javax.imageio.ImageIO;
@@ -126,7 +127,7 @@ public class DataGui extends JFrame
 
     public void updateData()
     {
-        Map<String, String> TDData = Collections.unmodifiableMap(TDHandler.DataMap);
+        Map<String, String> TDData = Collections.unmodifiableMap(new HashMap<>(TDHandler.DATA_MAP));
 
         DefaultListModel<String> modelCClass = new DefaultListModel<>();
         TDData.keySet().stream()

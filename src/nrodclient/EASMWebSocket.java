@@ -4,18 +4,22 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.security.GeneralSecurityException;
+import java.nio.channels.SelectionKey;
+import java.security.KeyManagementException;
 import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
 import java.security.UnrecoverableKeyException;
+import java.security.cert.CertificateException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
 import nrodclient.stomp.handlers.TDHandler;
 import org.java_websocket.WebSocket;
+import org.java_websocket.WebSocketImpl;
 import org.java_websocket.framing.CloseFrame;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.server.DefaultSSLWebSocketServerFactory;
@@ -24,7 +28,7 @@ import org.json.JSONObject;
 
 public class EASMWebSocket extends WebSocketServer
 {
-    public EASMWebSocket(int port, boolean useSSL) throws IOException, GeneralSecurityException
+    public EASMWebSocket(int port, boolean useSSL)
     {
         super(new InetSocketAddress(port));
         
@@ -32,11 +36,13 @@ public class EASMWebSocket extends WebSocketServer
         {
             try
             {
+                WebSocketImpl.DEBUG = true;
+                
                 KeyStore ks = KeyStore.getInstance("jks");
-                ks.load(new FileInputStream(new File(NRODClient.EASM_STORAGE_DIR, "certs" + File.separator + "keystore.jks")), "*@ymbGJBu3NDHUPz&Kst7x2fXq9eeykqpkV".toCharArray());
+                ks.load(new FileInputStream(new File(NRODClient.EASM_STORAGE_DIR, "certs" + File.separator + "keystore.jks")), "KkwnhSGpu428uhf".toCharArray());
 
                 KeyManagerFactory kmf = KeyManagerFactory.getInstance("SunX509");
-                kmf.init(ks, "*@ymbGJBu3NDHUPz&Kst7x2fXq9eeykqpkV".toCharArray());
+                kmf.init(ks, "KkwnhSGpu428uhf".toCharArray());
                 TrustManagerFactory tmf = TrustManagerFactory.getInstance("SunX509");
                 tmf.init(ks);
 
@@ -45,8 +51,18 @@ public class EASMWebSocket extends WebSocketServer
 
                 setWebSocketFactory(new DefaultSSLWebSocketServerFactory(sslContext));
             }
-            catch (UnrecoverableKeyException e) { NRODClient.printThrowable(e, "SSLWebSocket"); }
+            catch (UnrecoverableKeyException | KeyManagementException | KeyStoreException | IOException | NoSuchAlgorithmException | CertificateException e)
+            {
+                NRODClient.printThrowable(e, "SSLWebSocket");
+            }
         }
+    }
+
+    @Override
+    protected boolean onConnect(SelectionKey key)
+    {
+        System.out.println(key.toString());
+        return super.onConnect(key);
     }
 
     @Override
@@ -58,7 +74,7 @@ public class EASMWebSocket extends WebSocketServer
         JSONObject content = new JSONObject();
         content.put("type", "SEND_ALL");
         content.put("timestamp", Long.toString(System.currentTimeMillis()));
-        content.put("message", new HashMap<>(TDHandler.DataMap));
+        content.put("message", TDHandler.DATA_MAP);
         message.put("Message", content);
         String messageStr = message.toString();
 

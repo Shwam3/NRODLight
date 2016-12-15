@@ -76,7 +76,6 @@ public class RTPPMHandler implements NRODListener
                 while ((line = br.readLine()) != null)
                     jsonString += line;
 
-                NRODClient.stdOut.println(jsonString);
                 JSONObject json = new JSONObject(jsonString);
 
                 readData(json.getJSONObject("RTPPMData"));
