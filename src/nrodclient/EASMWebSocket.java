@@ -19,7 +19,6 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
 import nrodclient.stomp.handlers.TDHandler;
 import org.java_websocket.WebSocket;
-import org.java_websocket.WebSocketImpl;
 import org.java_websocket.framing.CloseFrame;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.server.DefaultSSLWebSocketServerFactory;
@@ -35,9 +34,7 @@ public class EASMWebSocket extends WebSocketServer
         if (useSSL)
         {
             try
-            {
-                WebSocketImpl.DEBUG = true;
-                
+            {                
                 KeyStore ks = KeyStore.getInstance("jks");
                 ks.load(new FileInputStream(new File(NRODClient.EASM_STORAGE_DIR, "certs" + File.separator + "keystore.jks")), "KkwnhSGpu428uhf".toCharArray());
 
