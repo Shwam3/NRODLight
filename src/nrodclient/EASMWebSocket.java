@@ -4,16 +4,14 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.nio.channels.SelectionKey;
 import java.security.KeyManagementException;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.List;
+import java.util.stream.Collectors;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
@@ -53,13 +51,6 @@ public class EASMWebSocket extends WebSocketServer
                 NRODClient.printThrowable(e, "SSLWebSocket");
             }
         }
-    }
-
-    @Override
-    protected boolean onConnect(SelectionKey key)
-    {
-        System.out.println(key.toString());
-        return super.onConnect(key);
     }
 
     @Override
@@ -110,12 +101,12 @@ public class EASMWebSocket extends WebSocketServer
     @Override
     public Collection<WebSocket> connections()
     {
-        List<WebSocket> conns = new ArrayList<>(super.connections().size());
-        for (WebSocket ws : super.connections())
-            if (ws != null && ws.isOpen())
-                conns.add(ws);
-        
-        return conns;
+        return super.connections().stream().filter(c -> c != null && c.isOpen()).collect(Collectors.toList());
+    }
+    
+    public boolean isClosed()
+    {
+        return isclosed.get();
     }
 
     public static void printWebSocket(String message, boolean toErr)

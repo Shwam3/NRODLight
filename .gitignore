@@ -60,3 +60,4 @@ $RECYCLE.BIN/
 /dist
 /build
 /nbproject
+src/nrodclient/resources/daphkey.openssh

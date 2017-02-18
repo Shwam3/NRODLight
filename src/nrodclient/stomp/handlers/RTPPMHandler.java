@@ -1,19 +1,26 @@
 package nrodclient.stomp.handlers;
 
+import com.jcraft.jsch.Channel;
+import com.jcraft.jsch.ChannelSftp;
+import com.jcraft.jsch.JSch;
+import com.jcraft.jsch.JSchException;
+import com.jcraft.jsch.Session;
+import com.jcraft.jsch.SftpException;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.net.MalformedURLException;
-import java.net.SocketTimeoutException;
-import java.net.URL;
-import java.net.URLConnection;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
@@ -287,7 +294,7 @@ public class RTPPMHandler implements NRODListener
             }
             catch (IOException e) { NRODClient.printThrowable(e, "RTPPM"); }
 
-            try (BufferedWriter bw = new BufferedWriter(new FileWriter(file, true)))
+            try (BufferedWriter bw = new BufferedWriter(new FileWriter(file, false)))
             {
                 bw.write(lastMessage);
                 bw.write("\r\n");
@@ -589,69 +596,6 @@ public class RTPPMHandler implements NRODListener
         }
     }
 
-    /*public static enum OperatorType
-    {
-        LONG_DISTANCE  ("*", "Long distance"),
-        SHORT_DISTANCE ("^", "Short distance"),
-        MIXED          ("",  "Mixed distances");
-
-        private final String keySymbol;
-        private final String description;
-
-        private OperatorType(String keySymbol, String description)
-        {
-            this.keySymbol   = keySymbol;
-            this.description = description;
-        }
-
-        public String getKeySymbol() { return keySymbol; }
-        public String getDescription() { return description; }
-
-        public static OperatorType getType(Object type)
-        {
-            if (type instanceof OperatorType)
-                return (OperatorType) type;
-            else
-                for (OperatorType typeEnum : values())
-                    if (typeEnum.equals(type) || type.equals(typeEnum.getDescription()) || type.equals(typeEnum.getKeySymbol()))
-                        return typeEnum;
-
-            return null;
-        }
-    }
-
-    public static enum SectorType
-    {
-        LSE ("LSE", "London and South East"),
-        LD  ("LD",  "Long Distance"),
-        REG ("REG", "Regional"),
-        SCO ("SCO", "Scotland");
-
-        private final String sectorCode;
-        private final String description;
-
-        private SectorType(String sectorCode, String description)
-        {
-            this.sectorCode  = sectorCode;
-            this.description = description;
-        }
-
-        public String getSectorCode()  { return sectorCode; }
-        public String getDescription() { return description; }
-
-        public static SectorType getType(Object type)
-        {
-            if (type instanceof SectorType)
-                return (SectorType) type;
-            else
-                for (SectorType typeEnum : values())
-                    if (typeEnum.equals(type) || type.equals(typeEnum.getDescription()) || type.equals(typeEnum.getSectorCode()))
-                        return typeEnum;
-
-            return null;
-        }
-    }*/
-
     public static JSONObject getPPMData()
     {
         JSONObject obj = new JSONObject();
@@ -681,29 +625,33 @@ public class RTPPMHandler implements NRODListener
                 File htmlFile = new File(NRODClient.EASM_STORAGE_DIR, "ppm.php");
                 if (htmlFile.exists())
                 {
-                    String html = "<html>Upload failed</html>";
-                    try (BufferedReader in = new BufferedReader(new FileReader(htmlFile)))
+                    try
                     {
-                        html = "";
-                        String line;
-                        while ((line = in.readLine()) != null)
-                            html += line + "\n";
-                    }
-                    catch (FileNotFoundException e) {}
-                    catch (IOException e) {}
+                        JSch jsch = new JSch();
+                        
+                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                        InputStream is = RTPPMHandler.class.getResourceAsStream("/nrodclient/resources/daphkey.openssh");
+                        byte[] buff = new byte[8192];
+                        int read;
+                        while ((read = is.read(buff, 0, buff.length)) != -1)
+                            baos.write(buff, 0, read);
+                        jsch.getIdentityRepository().add(baos.toByteArray());
+                        jsch.setKnownHosts(new ByteArrayInputStream("themork.co.uk ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDw84qH2bQ3NmQD3QLQ0cayrMMYSkgY3K95b6F5IuP+uveo099gLzBijP3NcDcr/XuTDbzPa9fcX1ajI+QLwsxGB0syKzAJvS/7P64xZKOeJdO9MtBBlHTfiV/Y2qq92vguNF07bNurcLHh7AoF3oFgqQJVfghLQyHz+TNFryHgeVUr4oXt67wyFgFiGZUTDoaA2fyW6NwbcSutHgxSTSaNE7AJhLn+xDcOr0WV1vQDZ86NTaP8+4sliasyn/oxRNsoQv82YoDBah9EP4YNaDVHY7B3MrH7IUbl7tMCyOOF5wFptlhAU6weJeunwr+B7NZJb6COkWZfKxdQxbtk/g9D".getBytes()));
+                        
+                        Session session = jsch.getSession("shwam3", "themork.co.uk");
+                        session.connect();
+                        Channel channel = session.openChannel("sftp");
+                        channel.connect();
+                        ChannelSftp channelSftp = (ChannelSftp) channel;
 
-                    URLConnection con = new URL(NRODClient.ftpBaseUrl + "/PPM/index.php;type=i").openConnection();
-                    con.setConnectTimeout(10000);
-                    con.setReadTimeout(10000);
-                    try (BufferedWriter out = new BufferedWriter(new OutputStreamWriter(con.getOutputStream())))
-                    {
-                        out.write(html);
-                        out.flush();
+                        channelSftp.put(new FileInputStream(htmlFile), "/var/www/shwam3/PPM/index.php");
 
+                        channelSftp.exit();
+                        session.disconnect();
+                        
                         printRTPPM("Uploaded HTML", false);
                     }
-                    catch (SocketTimeoutException e) { printRTPPM("HTML upload Timeout", true); }
-                    catch (IOException e) { printRTPPM("Exception during HTML Upload", true); }
+                    catch (JSchException | SftpException ex) { NRODClient.printThrowable(ex, "RTPPM"); }
                 }
             }
             catch (MalformedURLException e) {}

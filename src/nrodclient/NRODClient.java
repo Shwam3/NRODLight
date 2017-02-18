@@ -141,13 +141,7 @@ public class NRODClient
         try { EventQueue.invokeAndWait(() -> guiData = new DataGui()); }
         catch (InvocationTargetException | InterruptedException e) { printThrowable(e, "Startup"); }
         
-        new Thread(() -> {
-            //webSocket = new EASMWebSocket(port, false);
-            webSocketSSL = new EASMWebSocket(portSSL, true);
-
-            //webSocket.start();
-            webSocketSSL.start();
-        }).start();
+        ensureServerOpen();
         
         if (StompConnectionHandler.wrappedConnect())
             StompConnectionHandler.printStomp("Initialised and working", false);
@@ -210,6 +204,7 @@ public class NRODClient
                     //    .filter(c -> c != null)
                     //    .filter(c -> c.isOpen())
                     //    .forEach(c -> c.send(messageStr));
+                    ensureServerOpen();
                     webSocketSSL.connections().stream()
                         .filter(c -> c != null)
                         .filter(c -> c.isOpen())
@@ -218,7 +213,7 @@ public class NRODClient
                 }
                 catch (Exception e) { printThrowable(e, "SendAll"); }
             }
-        }, 500, 1000*60);
+        }, 500, 60000);
 
         updatePopupMenu();
     }
@@ -226,10 +221,18 @@ public class NRODClient
     //<editor-fold defaultstate="collapsed" desc="Print methods">
     public static void printThrowable(Throwable t, String name)
     {
-        printErr((name != null && !name.isEmpty() ? "[" + name + "] " : "") + t.toString());
+        name = name == null ? "" : name;
+        
+        StackTraceElement caller = Thread.currentThread().getStackTrace()[2];
+        name += (name.isEmpty() ? "" : " ");
+        name += caller.getFileName() != null && caller.getLineNumber() >= 0 ?
+          "(" + caller.getFileName() + ":" + caller.getLineNumber() + ")" :
+          (caller.getFileName() != null ?  "("+caller.getFileName()+")" : "(Unknown Source)");
+            
+        printErr("[" + name + "] " + t.toString());
 
         for (StackTraceElement element : t.getStackTrace())
-            printErr((name != null && !name.isEmpty() ? "[" + name + "] -> " : "-> ") + element.toString());
+            printErr("[" + name + "] -> " + element.toString());
 
         for (Throwable sup : t.getSuppressed())
             printThrowable0(sup, name);
@@ -462,6 +465,20 @@ public class NRODClient
                 trayIconAdded = true;
             }
             catch (AWTException e) { printThrowable(e, "SystemTrayIcon"); }
+        }
+    }
+
+    private static void ensureServerOpen()
+    {
+        if (webSocketSSL == null || webSocketSSL.isClosed())
+        {
+            new Thread(() -> {
+                //webSocket = new EASMWebSocket(port, false);
+                webSocketSSL = new EASMWebSocket(portSSL, true);
+
+                //webSocket.start();
+                webSocketSSL.run();
+            }).start();
         }
     }
 }

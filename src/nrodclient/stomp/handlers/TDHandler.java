@@ -13,6 +13,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import nrodclient.NRODClient;
 import nrodclient.stomp.NRODListener;
 import nrodclient.stomp.StompConnectionHandler;
@@ -27,12 +28,9 @@ public class TDHandler implements NRODListener
     private static File        logFile;
     private static String      lastLogDate = "";
     private long               lastMessageTime = 0;
-
-    private static boolean isSaving = false;
     
-    private final static List<String> areaFilters = Collections.unmodifiableList(Arrays.asList("AW","CA","CC","DR","EN","K2","KX","LS","NX","PB","Q1","Q2","Q3","Q4","SE","SI","SO","SX","UR","U2","U3","WG"));
-
-    File TDDataFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TD" + File.separator + "TDData.json");
+    private final static List<String> areaFilters = Collections.unmodifiableList(Arrays.asList(
+        "AW","CA","CC","CT","DR","EN","K2","KX","LS","NX","PB","Q1","Q2","Q3","Q4","SE","SI","SO","SX","UR","U2","U3","WG"));
 
     private static NRODListener instance = null;
     private TDHandler()
@@ -142,7 +140,7 @@ public class TDHandler implements NRODListener
         return instance;
     }
 
-    public static final Map<String, String> DATA_MAP = Collections.synchronizedMap(new HashMap<>());
+    public static final Map<String, String> DATA_MAP = new ConcurrentHashMap<>();
 
     @Override
     public void message(Map<String, String> headers, String body)
@@ -169,10 +167,11 @@ public class TDHandler implements NRODListener
                 {
                     case "CA_MSG":
                     {
-                        updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "");
-                        updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"));
-                        DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "");
-                        DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"));
+                        if (!"".equals(DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "")));
+                            updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "");
+                            
+                        if (!indvMsg.getString("descr").equals(DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"))));
+                            updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"));
 
                         printTD(String.format("Step %s from %s to %s",
                                 indvMsg.getString("descr"),
@@ -185,8 +184,8 @@ public class TDHandler implements NRODListener
                     
                     case "CB_MSG":
                     {
-                        updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "");
-                        DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "");
+                        if (!"".equals(DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "")))
+                            updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "");
 
                         printTD(String.format("Cancel %s from %s",
                                 indvMsg.getString("descr"),
@@ -198,8 +197,8 @@ public class TDHandler implements NRODListener
                     
                     case "CC_MSG":
                     {
-                        updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"));
-                        DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"));
+                        if (!indvMsg.getString("descr").equals(DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"))));
+                            updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"));
 
                         printTD(String.format("Interpose %s to %s",
                                 indvMsg.getString("descr"),
@@ -229,19 +228,20 @@ public class TDHandler implements NRODListener
                         for (int i = 0; i < data.length; i++)
                         {
                             String address = msgAddr + ":" + Integer.toString(8 - i);
-
-                            if (!DATA_MAP.containsKey(address) || DATA_MAP.get(address) == null || !DATA_MAP.get(address).equals(String.valueOf(data[i])))
+                            String dataBit = String.valueOf(data[i]);
+                            
+                            if (!DATA_MAP.containsKey(address) || DATA_MAP.get(address) == null || !dataBit.equals(DATA_MAP.get(address)))
                             {
-                                if (!DATA_MAP.getOrDefault(address, "0").equals(String.valueOf(data[i])))
-                                    printTD(String.format("Change %s from %s to %s",
-                                            address,
-                                            DATA_MAP.getOrDefault(address, "0"),
-                                            data[i]),
-                                        false,
-                                        Long.parseLong(indvMsg.getString("time")));
+                                printTD(String.format("Change %s from %s to %s",
+                                        address,
+                                        DATA_MAP.getOrDefault(address, "0"),
+                                        dataBit),
+                                    false,
+                                    Long.parseLong(indvMsg.getString("time")));
+
+                                updateMap.put(address, dataBit);
                             }
-                            updateMap.put(address, String.valueOf(data[i]));
-                            DATA_MAP.put(address, String.valueOf(data[i]));
+                            DATA_MAP.put(address, dataBit);
                         }
                         break;
                     }
@@ -341,6 +341,16 @@ public class TDHandler implements NRODListener
                 
                 if (key.length() != 6)
                     return;
+                
+                if (!DataFile.exists())
+                {
+                    try
+                    {
+                        DataFile.getParentFile().mkdirs();
+                        DataFile.createNewFile();
+                    }
+                    catch (IOException ex) { NRODClient.printThrowable(ex, "TD"); }
+                }
                                 
                 try (BufferedWriter bw = new BufferedWriter(new FileWriter(DataFile, false)))
                 {
