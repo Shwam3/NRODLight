@@ -6,6 +6,7 @@ import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.JSchException;
 import com.jcraft.jsch.Session;
 import com.jcraft.jsch.SftpException;
+import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.ByteArrayInputStream;
@@ -17,10 +18,8 @@ import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
-import java.net.MalformedURLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
@@ -469,7 +468,7 @@ public class RTPPMHandler implements NRODListener
                     else
                     {
                         sb.append("<td class=\"ppmTable\" style=\"color:").append(getColour(map.getJSONObject("PPM").getString("rag"))).append("\">");
-                        try { sb.append("<abbr title=\"guess\">").append(100 * (Integer.parseInt(map.getString("OnTime")) / Integer.parseInt(map.getString("Total")))).append("%</abbr>"); }
+                        try { sb.append("<abbr title=\"estimated\">").append(100 * (Integer.parseInt(map.getString("OnTime")) / Integer.parseInt(map.getString("Total")))).append("%</abbr>"); }
                         catch (NumberFormatException | ArithmeticException e) { sb.append("N/A"); }
                         sb.append("</td>");
                     }
@@ -618,45 +617,44 @@ public class RTPPMHandler implements NRODListener
 
     public static void uploadHTML()
     {
-        if (!NRODClient.ftpBaseUrl.isEmpty())
+        try
         {
-            try
+            File htmlFile = new File(NRODClient.EASM_STORAGE_DIR, "ppm.php");
+            if (htmlFile.exists())
             {
-                File htmlFile = new File(NRODClient.EASM_STORAGE_DIR, "ppm.php");
-                if (htmlFile.exists())
+                try
                 {
-                    try
+                    NRODClient.reloadConfig();
+                    JSch jsch = new JSch();
+
+                    try (ByteArrayOutputStream baos = new ByteArrayOutputStream(); BufferedInputStream is = new BufferedInputStream(new FileInputStream(new File(NRODClient.EASM_STORAGE_DIR, "key.openssh"))))
                     {
-                        JSch jsch = new JSch();
-                        
-                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                        InputStream is = RTPPMHandler.class.getResourceAsStream("/nrodclient/resources/daphkey.openssh");
                         byte[] buff = new byte[8192];
                         int read;
                         while ((read = is.read(buff, 0, buff.length)) != -1)
                             baos.write(buff, 0, read);
+                        
                         jsch.getIdentityRepository().add(baos.toByteArray());
-                        jsch.setKnownHosts(new ByteArrayInputStream("themork.co.uk ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDw84qH2bQ3NmQD3QLQ0cayrMMYSkgY3K95b6F5IuP+uveo099gLzBijP3NcDcr/XuTDbzPa9fcX1ajI+QLwsxGB0syKzAJvS/7P64xZKOeJdO9MtBBlHTfiV/Y2qq92vguNF07bNurcLHh7AoF3oFgqQJVfghLQyHz+TNFryHgeVUr4oXt67wyFgFiGZUTDoaA2fyW6NwbcSutHgxSTSaNE7AJhLn+xDcOr0WV1vQDZ86NTaP8+4sliasyn/oxRNsoQv82YoDBah9EP4YNaDVHY7B3MrH7IUbl7tMCyOOF5wFptlhAU6weJeunwr+B7NZJb6COkWZfKxdQxbtk/g9D".getBytes()));
-                        
-                        Session session = jsch.getSession("shwam3", "themork.co.uk");
-                        session.connect();
-                        Channel channel = session.openChannel("sftp");
-                        channel.connect();
-                        ChannelSftp channelSftp = (ChannelSftp) channel;
-
-                        channelSftp.put(new FileInputStream(htmlFile), "/var/www/shwam3/PPM/index.php");
-
-                        channelSftp.exit();
-                        session.disconnect();
-                        
-                        printRTPPM("Uploaded HTML", false);
+                        jsch.setKnownHosts(new ByteArrayInputStream(NRODClient.config.getString("SCP_Host").getBytes()));
                     }
-                    catch (JSchException | SftpException ex) { NRODClient.printThrowable(ex, "RTPPM"); }
+
+                    Session session = jsch.getSession(NRODClient.config.getString("SCP_User"), "signalmaps.co.uk");
+                    session.connect();
+                    Channel channel = session.openChannel("sftp");
+                    channel.connect();
+                    ChannelSftp channelSftp = (ChannelSftp) channel;
+
+                    channelSftp.put(new FileInputStream(htmlFile), NRODClient.config.getString("SCP_PPM_Path"));
+
+                    channelSftp.exit();
+                    session.disconnect();
+
+                    printRTPPM("Uploaded HTML", false);
                 }
+                catch (JSchException | SftpException ex) { NRODClient.printThrowable(ex, "RTPPM"); }
             }
-            catch (MalformedURLException e) {}
-            catch (IOException e) { NRODClient.printThrowable(e, "RTPPM"); }
         }
+        catch (IOException e) { NRODClient.printThrowable(e, "RTPPM"); }
     }
 
     public long getTimeout() { return System.currentTimeMillis() - lastMessageTime; }

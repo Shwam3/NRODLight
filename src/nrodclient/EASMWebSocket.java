@@ -1,20 +1,28 @@
 package nrodclient;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.file.Files;
+import java.security.KeyFactory;
 import java.security.KeyManagementException;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.UnrecoverableKeyException;
+import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.Collection;
 import java.util.stream.Collectors;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManagerFactory;
+import javax.xml.bind.DatatypeConverter;
 import nrodclient.stomp.handlers.TDHandler;
 import org.java_websocket.WebSocket;
 import org.java_websocket.framing.CloseFrame;
@@ -31,32 +39,66 @@ public class EASMWebSocket extends WebSocketServer
         
         if (useSSL)
         {
-            try
-            {                
-                KeyStore ks = KeyStore.getInstance("jks");
-                ks.load(new FileInputStream(new File(NRODClient.EASM_STORAGE_DIR, "certs" + File.separator + "keystore.jks")), "KkwnhSGpu428uhf".toCharArray());
-
-                KeyManagerFactory kmf = KeyManagerFactory.getInstance("SunX509");
-                kmf.init(ks, "KkwnhSGpu428uhf".toCharArray());
-                TrustManagerFactory tmf = TrustManagerFactory.getInstance("SunX509");
-                tmf.init(ks);
-
-                SSLContext sslContext = SSLContext.getInstance("TLS");
-                sslContext.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
-
+            SSLContext sslContext = getSSLContextFromLetsEncrypt();
+            if (sslContext != null)
                 setWebSocketFactory(new DefaultSSLWebSocketServerFactory(sslContext));
-            }
-            catch (UnrecoverableKeyException | KeyManagementException | KeyStoreException | IOException | NoSuchAlgorithmException | CertificateException e)
-            {
-                NRODClient.printThrowable(e, "SSLWebSocket");
-            }
+            else
+                printWebSocket("Unable to create SSL Context", true);
         }
+    }
+    
+    private SSLContext getSSLContextFromLetsEncrypt()
+    {
+        SSLContext context;
+        File certDir = new File(NRODClient.EASM_STORAGE_DIR, "certs");
+        try
+        {
+            context = SSLContext.getInstance("TLS");
+
+            byte[] certBytes = parseDERFromPEM(Files.readAllBytes(new File(certDir , "cert.pem").toPath()), "-----BEGIN CERTIFICATE-----", "-----END CERTIFICATE-----");
+            byte[] keyBytes = parseDERFromPEM(Files.readAllBytes(new File(certDir , "privkey.pem").toPath()), "-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----");
+
+            CertificateFactory certFactory = CertificateFactory.getInstance("X.509");
+            X509Certificate cert = (X509Certificate) certFactory.generateCertificate(new ByteArrayInputStream(certBytes));
+            
+            KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+            RSAPrivateKey key = (RSAPrivateKey) keyFactory.generatePrivate(new PKCS8EncodedKeySpec(keyBytes));
+
+            KeyStore keystore = KeyStore.getInstance("JKS");
+            keystore.load(null);
+            keystore.setCertificateEntry("cert-alias", cert);
+            keystore.setKeyEntry("key-alias", key, new char[0], new Certificate[]{cert});
+
+            KeyManagerFactory kmf = KeyManagerFactory.getInstance("SunX509");
+            kmf.init(keystore, new char[0]);
+
+            context.init(kmf.getKeyManagers(), null, null);
+        }
+        catch (IOException | KeyManagementException | KeyStoreException | InvalidKeySpecException | UnrecoverableKeyException | NoSuchAlgorithmException | CertificateException e)
+        {
+            NRODClient.printThrowable(e, "WebSocket");
+            return null;
+        }        
+        return context;
+    }
+
+    protected static byte[] parseDERFromPEM(byte[] pem, String beginDelimiter, String endDelimiter)
+    {
+        String data = new String(pem);
+        String[] tokens = data.split(beginDelimiter);
+        tokens = tokens[1].split(endDelimiter);
+        return DatatypeConverter.parseBase64Binary(tokens[0]);
     }
 
     @Override
     public void onOpen(WebSocket conn, ClientHandshake handshake)
     {
-        printWebSocket("Open connection to " + conn.getRemoteSocketAddress().getAddress().getHostAddress() + ":" + conn.getRemoteSocketAddress().getPort(), false);
+        printWebSocket(String.format("Open connection to %s:%s from %s%s",
+                conn.getRemoteSocketAddress().getAddress().getHostAddress(),
+                conn.getRemoteSocketAddress().getPort(),
+                handshake.hasFieldValue("Origin") ? handshake.getFieldValue("Origin") : "Unknown",
+                handshake.hasFieldValue("User-Agent") ? " (" + handshake.getFieldValue("User-Agent") + ")" : ""
+            ), false);
 
         JSONObject message = new JSONObject();
         JSONObject content = new JSONObject();

@@ -17,22 +17,25 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ItemEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.lang.management.ManagementFactory;
 import java.lang.reflect.InvocationTargetException;
 import java.security.GeneralSecurityException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 import java.util.Timer;
 import java.util.TimerTask;
 import javax.swing.JOptionPane;
@@ -45,16 +48,17 @@ import nrodclient.stomp.handlers.TDHandler;
 import nrodclient.stomp.handlers.TSRHandler;
 import nrodclient.stomp.handlers.VSTPHandler;
 import org.java_websocket.WebSocket;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 public class NRODClient
 {
     public static final String VERSION = "2";
 
-    public  static final boolean verbose = false;
-    public  static boolean stop = true;
-
+    public static final boolean verbose = false;
+    
     public static final File EASM_STORAGE_DIR = new File(System.getProperty("user.home", "C:") + File.separator + ".easigmap");
+    public static JSONObject config = new JSONObject();
 
     public static SimpleDateFormat sdfTime          = new SimpleDateFormat("HH:mm:ss");
     public static SimpleDateFormat sdfDate          = new SimpleDateFormat("dd/MM/yy");
@@ -65,47 +69,15 @@ public class NRODClient
     private static File         logFile;
     private static String       lastLogDate = "";
 
-    public  static String ftpBaseUrl = "";
-
-    private static boolean  trayIconAdded = false;
     private static TrayIcon sysTrayIcon = null;
     
-    public  static final int     port = 6322;
-    public  static EASMWebSocket webSocket;
-    public  static final int     portSSL = 6323;
-    public  static EASMWebSocket webSocketSSL;
-    public  static DataGui       guiData;
+    public static final int     port = 6323;
+    public static EASMWebSocket webSocket;
+    public static DataGui       guiData;
 
     public static PrintStream stdOut = System.out;
     public static PrintStream stdErr = System.err;
     
-    /*static
-    {
-        String ver = "1";
-        int prt = 6322;
-        
-        File versionFile = new File(EASMStorageDir, "NROD_Version.properties");
-        try
-        {
-            //if (versionFile.exists())
-            //{
-            //    Properties versionProps = new Properties();
-            //    versionProps.load(new FileInputStream(versionFile));
-            //    ver = versionProps.getProperty("version", ver);
-            //}
-
-            //if (!NRODClient.class.getResource(NRODClient.class.getSimpleName() + ".class").toString().contains(".jar"))
-            //{
-            //    ver += "-DEV";
-            //    prt += 2;
-            //}
-        }
-        catch (IOException ex) { ex.printStackTrace(); }
-        
-        VERSION = ver;
-        port = prt;
-    }*/
-
     public static void main(String[] args) throws IOException, GeneralSecurityException
     {
         try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()); }
@@ -123,23 +95,40 @@ public class NRODClient
             System.setErr(logStream);
         }
         catch (FileNotFoundException e) { printErr("Could not create log file"); printThrowable(e, "Startup"); }
-
-        try
-        {
-            File ftpLoginFile = new File(EASM_STORAGE_DIR, "Website_FTP_Login.properties");
-            if (ftpLoginFile.exists())
-            {
-                Properties ftpLogin = new Properties();
-                ftpLogin.load(new FileInputStream(ftpLoginFile));
-
-                ftpBaseUrl = "ftp://" + ftpLogin.getProperty("Username", "") + ":" + ftpLogin.getProperty("Password", "") + "@" + ftpLogin.getOrDefault("URL", "");
-            }
-        }
-        catch (FileNotFoundException e) {}
-        catch (IOException e) { printThrowable(e, "FTP Login"); }
+        
+        reloadConfig();
         
         try { EventQueue.invokeAndWait(() -> guiData = new DataGui()); }
         catch (InvocationTargetException | InterruptedException e) { printThrowable(e, "Startup"); }
+        
+        try
+        {
+            File TDDataDir = new File(NRODClient.EASM_STORAGE_DIR, "TDData");
+            for (File perAreaDir : TDDataDir.listFiles())
+            {
+                String area = perAreaDir.getName();
+                if (area.length() != 2 || !perAreaDir.isDirectory())
+                    continue;
+
+                for (File TDData : perAreaDir.listFiles())
+                {
+                    String dataID = TDData.getName().replace("-", ":");
+
+                    if (TDData.isDirectory() || !dataID.endsWith(".td") || dataID.length() != 7)
+                        continue;
+                    
+                    String data = "";
+                    try (BufferedReader br = new BufferedReader(new FileReader(TDData)))
+                    {
+                        data = br.readLine();
+                    }
+                    catch (IOException ex) { NRODClient.printThrowable(ex, "TD-Startup"); }
+
+                    TDHandler.DATA_MAP.put(area + dataID.substring(0, 4), data == null ? "" : data);
+                }
+            }
+        }
+        catch (Exception e) { NRODClient.printThrowable(e, "TD-Startup"); }
         
         ensureServerOpen();
         
@@ -163,27 +152,6 @@ public class NRODClient
                 catch (Exception e) { printErr("[Timer] Exception: " + e.toString()); }
             }
         }, 30000, 30000);
-        /*Timer managementTimer = new Timer("managementTimer", true);
-        managementTimer.scheduleAtFixedRate(new TimerTask()
-        {
-            @Override
-            public void run()
-            {
-                try
-                {
-                    JSONObject managementContainer = new JSONObject();
-                    JSONObject management = new JSONObject();
-                    JSONArray connections = new JSONArray();
-                    NRODClient.webSocket.connections().stream().filter(c -> c != null).forEachOrdered(c -> connections.put(c.getRemoteSocketAddress().getAddress().getHostAddress() + ":" + c.getRemoteSocketAddress().getPort()));
-                    management.put("connections", connections);
-                    
-                    managementContainer.put("management", "");
-                    managementContainer.put("timestamp", System.currentTimeMillis());
-                }
-                catch (NullPointerException e) {}
-                catch (Exception e) { printErr("[Timer] Exception: " + e.toString()); }
-            }
-        }, 30000, 30000);*/
         Timer FullUpdateMessenger = new Timer("FullUpdateMessenger");
         FullUpdateMessenger.schedule(new TimerTask()
         {
@@ -200,12 +168,8 @@ public class NRODClient
                     message.put("Message", content);
                     String messageStr = message.toString();
 
-                    //webSocket.connections().stream()
-                    //    .filter(c -> c != null)
-                    //    .filter(c -> c.isOpen())
-                    //    .forEach(c -> c.send(messageStr));
                     ensureServerOpen();
-                    webSocketSSL.connections().stream()
+                    webSocket.connections().stream()
                         .filter(c -> c != null)
                         .filter(c -> c.isOpen())
                         .forEach(c -> c.send(messageStr));
@@ -335,13 +299,10 @@ public class NRODClient
                 {
                     NRODClient.updatePopupMenu();
                     
-                    //Collection<WebSocket> conns = Collections.unmodifiableCollection(NRODClient.webSocket.connections());
-                    Collection<WebSocket> connsSSL = Collections.unmodifiableCollection(NRODClient.webSocketSSL.connections());
+                    Collection<WebSocket> connsSSL = Collections.unmodifiableCollection(NRODClient.webSocket.connections());
                     StringBuilder statusMsg = new StringBuilder();
                     statusMsg.append("WebSocket:");
-                    statusMsg.append("\n  Connections: ").append(/*conns.size() + */connsSSL.size());
-                    statusMsg.append("\n    Insecure: disabled")/*.append(conns.size())*/;
-                    //conns.stream().filter(c -> c != null).forEachOrdered(c -> statusMsg.append("\n      ").append(c.getRemoteSocketAddress().getAddress().getHostAddress()).append(":").append(c.getRemoteSocketAddress().getPort()));
+                    statusMsg.append("\n  Connections: ").append(connsSSL.size());
                     statusMsg.append("\n    Secure: ").append(connsSSL.size());
                     connsSSL.stream().filter(c -> c != null).forEachOrdered(c -> statusMsg.append("\n      ").append(c.getRemoteSocketAddress().getAddress().getHostAddress()).append(":").append(c.getRemoteSocketAddress().getPort()));
                     statusMsg.append("\nStomp:");
@@ -364,28 +325,25 @@ public class NRODClient
                     String input = JOptionPane.showInputDialog(null, "Please input the data in the format: 'key:value;key:value':", "Input Data", JOptionPane.QUESTION_MESSAGE);
                     if (input != null)
                     {
-                        Map<String, String> map = new HashMap();
+                        Map<String, String> updateMap = new HashMap();
                         String[] pairs = input.split(";");
                         
                         for (String pair : pairs)
                             if (pair.length() >= 7)
                                 if (pair.charAt(6) == ':')
-                                    map.put(pair.substring(0, 6), pair.substring(7));
+                                    updateMap.put(pair.substring(0, 6), pair.substring(7));
                             
                         JSONObject container = new JSONObject();
                         JSONObject message = new JSONObject();
                         message.put("type", "SEND_UPDATE");
                         message.put("timestamp", System.currentTimeMillis());
-                        message.put("message", map);
+                        message.put("message", updateMap);
                         container.put("Message", message);
-                        TDHandler.DATA_MAP.putAll(map);
+                        TDHandler.DATA_MAP.putAll(updateMap);                        
+                        TDHandler.saveTDData(updateMap);
 
                         String messageStr = container.toString();
-                        //NRODClient.webSocket.connections().stream()
-                        //        .filter(c -> c != null)
-                        //        .filter(c -> c.isOpen())
-                        //        .forEach(c -> c.send(messageStr));
-                        NRODClient.webSocketSSL.connections().stream()
+                        NRODClient.webSocket.connections().stream()
                                 .filter(c -> c != null)
                                 .filter(c -> c.isOpen())
                                 .forEach(c -> c.send(messageStr));
@@ -459,10 +417,8 @@ public class NRODClient
 
                 sysTrayIcon.setPopupMenu(menu);
 
-                if (!trayIconAdded)
+                if (!Arrays.asList(SystemTray.getSystemTray().getTrayIcons()).contains(sysTrayIcon))
                     SystemTray.getSystemTray().add(sysTrayIcon);
-
-                trayIconAdded = true;
             }
             catch (AWTException e) { printThrowable(e, "SystemTrayIcon"); }
         }
@@ -470,15 +426,54 @@ public class NRODClient
 
     private static void ensureServerOpen()
     {
-        if (webSocketSSL == null || webSocketSSL.isClosed())
+        if (webSocket == null || webSocket.isClosed())
         {
             new Thread(() -> {
-                //webSocket = new EASMWebSocket(port, false);
-                webSocketSSL = new EASMWebSocket(portSSL, true);
-
-                //webSocket.start();
-                webSocketSSL.run();
+                EASMWebSocket ews = new EASMWebSocket(port, true);
+                try
+                {
+                    webSocket = ews;
+                    webSocket.run();
+                }
+                catch (Exception e)
+                {
+                    printThrowable(e, "WebSocket");
+                }
+                finally
+                {
+                    EASMWebSocket.printWebSocket("WebSocket server runnable finished" + (ews.isClosed() ? "" : " unnexpectedly"), !ews.isClosed());
+                    
+                    if (ews == webSocket)
+                    {
+                        try
+                        {
+                            webSocket = null;
+                            ews.stop(0);
+                        }
+                        catch (Exception e) {}
+                    }
+                }
             }).start();
         }
+    }
+    
+    public static void reloadConfig()
+    {
+        try (BufferedReader br = new BufferedReader(new FileReader(new File(EASM_STORAGE_DIR, "config.json"))))
+        {
+            StringBuilder sb = new StringBuilder();
+            
+            String line;
+            while ((line = br.readLine()) != null)
+                sb.append(line);
+            
+            JSONObject obj = new JSONObject(sb.toString());
+            config = obj;
+        } catch (IOException | JSONException e) { NRODClient.printThrowable(e, "Config"); }
+        
+        List<String> filter = new ArrayList<>();
+        config.getJSONArray("TD_Area_Filter").forEach(e -> filter.add((String) e));
+        filter.sort(null);
+        TDHandler.setAreaFilter(filter);
     }
 }

@@ -1,13 +1,9 @@
 package nrodclient.stomp;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.UnknownHostException;
 import java.util.Date;
 import java.util.Map;
-import java.util.Properties;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -57,23 +53,9 @@ public class StompConnectionHandler
         subscribedTSR   = false;
         subscribedTD    = false;
 
-        String username;
-        String password;
-
-        File loginFile = new File(NRODClient.EASM_STORAGE_DIR, "NROD_Login.properties");
-        try (FileInputStream in = new FileInputStream(loginFile))
-        {
-            Properties loginProps = new Properties();
-            loginProps.load(in);
-
-            username = loginProps.getProperty("Username", "");
-            password = loginProps.getProperty("Password", "");
-        }
-        catch (FileNotFoundException e)
-        {
-            printStomp("Unable to find login properties file (" + loginFile + ")", true);
-            return false;
-        }
+        NRODClient.reloadConfig();
+        String username = NRODClient.config.optString("NROD_Username", "");
+        String password = NRODClient.config.optString("NROD_Password", "");
 
         appID = username + "-NRODClient-v" + NRODClient.VERSION;
 
