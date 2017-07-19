@@ -1,10 +1,7 @@
 package nrodclient;
 
 import java.awt.AWTException;
-import java.awt.CheckboxMenuItem;
 import java.awt.Desktop;
-import java.awt.EventQueue;
-import java.awt.Menu;
 import java.awt.MenuItem;
 import java.awt.MouseInfo;
 import java.awt.Point;
@@ -14,7 +11,6 @@ import java.awt.SystemTray;
 import java.awt.Toolkit;
 import java.awt.TrayIcon;
 import java.awt.event.ActionEvent;
-import java.awt.event.ItemEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.BufferedReader;
@@ -25,7 +21,6 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.lang.management.ManagementFactory;
-import java.lang.reflect.InvocationTargetException;
 import java.security.GeneralSecurityException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -42,18 +37,15 @@ import javax.swing.JOptionPane;
 import javax.swing.UIManager;
 import javax.swing.UnsupportedLookAndFeelException;
 import nrodclient.stomp.StompConnectionHandler;
-import nrodclient.stomp.handlers.MVTHandler;
-import nrodclient.stomp.handlers.RTPPMHandler;
 import nrodclient.stomp.handlers.TDHandler;
-import nrodclient.stomp.handlers.TSRHandler;
-import nrodclient.stomp.handlers.VSTPHandler;
+import nrodclient.ws.EASMWebSocket;
 import org.java_websocket.WebSocket;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 public class NRODClient
 {
-    public static final String VERSION = "2";
+    public static final String VERSION = "3";
 
     public static final boolean verbose = false;
     
@@ -68,12 +60,11 @@ public class NRODClient
     public  static PrintStream  logStream;
     private static File         logFile;
     private static String       lastLogDate = "";
-
+    
     private static TrayIcon sysTrayIcon = null;
     
-    public static final int     port = 6323;
+    public static final int     port = 6423;
     public static EASMWebSocket webSocket;
-    public static DataGui       guiData;
 
     public static PrintStream stdOut = System.out;
     public static PrintStream stdErr = System.err;
@@ -84,7 +75,7 @@ public class NRODClient
         catch (ClassNotFoundException | InstantiationException | IllegalAccessException | UnsupportedLookAndFeelException e) { printThrowable(e, "Look & Feel"); }
 
         Date logDate = new Date();
-        logFile = new File(EASM_STORAGE_DIR, "Logs" + File.separator + "NRODClient" + File.separator + sdfDate.format(logDate).replace("/", "-") + ".log");
+        logFile = new File(EASM_STORAGE_DIR, "Logs" + File.separator + "NRODLight" + File.separator + sdfDate.format(logDate).replace("/", "-") + ".log");
         logFile.getParentFile().mkdirs();
         lastLogDate = sdfDate.format(logDate);
 
@@ -97,9 +88,6 @@ public class NRODClient
         catch (FileNotFoundException e) { printErr("Could not create log file"); printThrowable(e, "Startup"); }
         
         reloadConfig();
-        
-        try { EventQueue.invokeAndWait(() -> guiData = new DataGui()); }
-        catch (InvocationTargetException | InterruptedException e) { printThrowable(e, "Startup"); }
         
         try
         {
@@ -163,7 +151,7 @@ public class NRODClient
                     JSONObject message = new JSONObject();
                     JSONObject content = new JSONObject();
                     content.put("type", "SEND_ALL");
-                    content.put("timestamp", Long.toString(System.currentTimeMillis()));
+                    content.put("timestamp", System.currentTimeMillis());
                     content.put("message", TDHandler.DATA_MAP);
                     message.put("Message", content);
                     String messageStr = message.toString();
@@ -173,12 +161,12 @@ public class NRODClient
                         .filter(c -> c != null)
                         .filter(c -> c.isOpen())
                         .forEach(c -> c.send(messageStr));
-                    printOut("[WebSocket] Updated all clients");
+                    EASMWebSocket.printWebSocket("Updated all clients", false);
                 }
                 catch (Exception e) { printThrowable(e, "SendAll"); }
             }
         }, 500, 60000);
-
+        
         updatePopupMenu();
     }
 
@@ -284,16 +272,8 @@ public class NRODClient
                 MenuItem itemOpenLog       = new MenuItem("Open Log File");
                 MenuItem itemOpenLogFolder = new MenuItem("Open Log File Folder");
                 MenuItem itemStatus        = new MenuItem("Status...");
-                MenuItem itemData          = new MenuItem("View Data...");
                 MenuItem itemInputData     = new MenuItem("Input Data...");
-                MenuItem itemRTPPMUpload   = new MenuItem("Upload RTPPM file");
                 MenuItem itemReconnect     = new MenuItem("Stomp Reconnect");
-
-                Menu menuSubscriptions                  = new Menu("Subscriptions");
-                CheckboxMenuItem itemSubscriptionsRTPPM = new CheckboxMenuItem("RTPPM", StompConnectionHandler.isSubscribedRTPPM());
-                CheckboxMenuItem itemSubscriptionsMVT   = new CheckboxMenuItem("MVT",   StompConnectionHandler.isSubscribedMVT());
-                CheckboxMenuItem itemSubscriptionsVSTP  = new CheckboxMenuItem("VSTP",  StompConnectionHandler.isSubscribedVSTP());
-                CheckboxMenuItem itemSubscriptionsTSR   = new CheckboxMenuItem("TSR",   StompConnectionHandler.isSubscribedTSR());
 
                 itemStatus.addActionListener((ActionEvent e) ->
                 {
@@ -310,16 +290,11 @@ public class NRODClient
                     statusMsg.append("\n  Timeout: ").append((System.currentTimeMillis() - StompConnectionHandler.lastMessageTimeGeneral) / 1000f).append("s");
                     statusMsg.append("\n  Subscriptions:");
                     statusMsg.append("\n    TD: ").append(String.format("%s - %.2fs", StompConnectionHandler.isSubscribedTD() ? "Yes" : "No", TDHandler.getInstance().getTimeout() / 1000f));
-                    statusMsg.append("\n    MVT: ").append(String.format("%s - %.2fs", StompConnectionHandler.isSubscribedMVT() ? "Yes" : "No", MVTHandler.getInstance().getTimeout() / 1000f));
-                    statusMsg.append("\n    RTPPM: ").append(String.format("%s - %.2fs", StompConnectionHandler.isSubscribedRTPPM() ? "Yes" : "No", RTPPMHandler.getInstance().getTimeout() / 1000f));
-                    statusMsg.append("\n    VSTP: ").append(String.format("%s - %.2fs", StompConnectionHandler.isSubscribedVSTP() ? "Yes" : "No", VSTPHandler.getInstance().getTimeout() / 1000f));
-                    statusMsg.append("\n    TSR: ").append(String.format("%s - %.2fs", StompConnectionHandler.isSubscribedTSR() ? "Yes" : "No", TSRHandler.getInstance().getTimeout() / 1000f));
                     statusMsg.append("\nLogfile: \"").append(NRODClient.logFile.getName()).append("\"");
                     statusMsg.append("\nStarted: ").append(NRODClient.sdfDateTime.format(ManagementFactory.getRuntimeMXBean().getStartTime()));
                     
                     JOptionPane.showMessageDialog(null, statusMsg.toString(), "NRODClient - Status", JOptionPane.INFORMATION_MESSAGE);
                 });
-                itemData.addActionListener(e -> NRODClient.guiData.setVisible(true));
                 itemInputData.addActionListener(e ->
                 {
                     String input = JOptionPane.showInputDialog(null, "Please input the data in the format: 'key:value;key:value':", "Input Data", JOptionPane.QUESTION_MESSAGE);
@@ -349,10 +324,6 @@ public class NRODClient
                                 .forEach(c -> c.send(messageStr));
                     }
                 });
-                itemRTPPMUpload.addActionListener((ActionEvent e) ->
-                {
-                    RTPPMHandler.uploadHTML();
-                });
                 itemReconnect.addActionListener((ActionEvent e) ->
                 {
                     if (JOptionPane.showConfirmDialog(null, "Are you sure you wish to reconnect?", "Confirmation", JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION)
@@ -361,10 +332,6 @@ public class NRODClient
                         StompConnectionHandler.wrappedConnect();
                     }
                 });
-                itemSubscriptionsRTPPM.addItemListener((ItemEvent e) -> { StompConnectionHandler.toggleRTPPM(); });
-                itemSubscriptionsMVT  .addItemListener((ItemEvent e) -> { StompConnectionHandler.toggleMVT(); });
-                itemSubscriptionsVSTP .addItemListener((ItemEvent e) -> { StompConnectionHandler.toggleVSTP(); });
-                itemSubscriptionsTSR  .addItemListener((ItemEvent e) -> { StompConnectionHandler.toggleTSR(); });
                 itemOpenLog.addActionListener((ActionEvent evt) ->
                 {
                     try { Desktop.getDesktop().open(NRODClient.logFile); }
@@ -384,17 +351,9 @@ public class NRODClient
                     }
                 });
 
-                menuSubscriptions.add(itemSubscriptionsRTPPM);
-                menuSubscriptions.add(itemSubscriptionsMVT);
-                menuSubscriptions.add(itemSubscriptionsVSTP);
-                menuSubscriptions.add(itemSubscriptionsTSR);
-
                 menu.add(itemStatus);
-                menu.add(itemData);
                 menu.add(itemInputData);
-                menu.add(itemRTPPMUpload);
                 menu.add(itemReconnect);
-                menu.add(menuSubscriptions);
                 menu.addSeparator();
                 menu.add(itemOpenLog);
                 menu.add(itemOpenLogFolder);
@@ -403,7 +362,7 @@ public class NRODClient
 
                 if (sysTrayIcon == null)
                 {
-                    sysTrayIcon = new TrayIcon(Toolkit.getDefaultToolkit().getImage(NRODClient.class.getResource("/nrodclient/resources/TrayIcon.png")), "NROD Client", menu);
+                    sysTrayIcon = new TrayIcon(Toolkit.getDefaultToolkit().getImage(NRODClient.class.getResource("/nrodclient/resources/TrayIcon.png")), "NROD Light", menu);
                     sysTrayIcon.setImageAutoSize(true);
                     sysTrayIcon.addMouseListener(new MouseAdapter()
                     {
@@ -423,7 +382,7 @@ public class NRODClient
             catch (AWTException e) { printThrowable(e, "SystemTrayIcon"); }
         }
     }
-
+    
     private static void ensureServerOpen()
     {
         if (webSocket == null || webSocket.isClosed())

@@ -4,7 +4,6 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
@@ -15,15 +14,16 @@ import java.util.concurrent.ConcurrentHashMap;
 import nrodclient.NRODClient;
 import nrodclient.stomp.NRODListener;
 import nrodclient.stomp.StompConnectionHandler;
+import nrodclient.ws.EASMWebSocketImpl;
 import org.java_websocket.WebSocket;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class TDHandler implements NRODListener
 {
-    private static PrintWriter logStream;
-    private static File        logFile;
-    private static String      lastLogDate = "";
+    //private static PrintWriter logStream;
+    //private static File        logFile;
+    //private static String      lastLogDate = "";
     private long               lastMessageTime = 0;
     
     private static List<String> areaFilters;
@@ -31,13 +31,13 @@ public class TDHandler implements NRODListener
     private static NRODListener instance = null;
     private TDHandler()
     {
-        Date logDate = new Date(System.currentTimeMillis());
-        logFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TD" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".log");
-        logFile.getParentFile().mkdirs();
-        lastLogDate = NRODClient.sdfDate.format(logDate);
+        //Date logDate = new Date(System.currentTimeMillis());
+        //logFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TD" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".log");
+        //logFile.getParentFile().mkdirs();
+        //lastLogDate = NRODClient.sdfDate.format(logDate);
 
-        try { logStream = new PrintWriter(new BufferedWriter(new FileWriter(logFile, true)), true); }
-        catch (IOException e) { NRODClient.printThrowable(e, "TD"); }
+        //try { logStream = new PrintWriter(new BufferedWriter(new FileWriter(logFile, true)), true); }
+        //catch (IOException e) { NRODClient.printThrowable(e, "TD"); }
         
         List<String> filter = new ArrayList<>();
         NRODClient.config.getJSONArray("TD_Area_Filter").forEach(e -> filter.add((String) e));
@@ -170,54 +170,70 @@ public class TDHandler implements NRODListener
                     case "SG_MSG":
                     case "SH_MSG":
                     {
-                        String addrStart = msgAddr.substring(0, 3);
-                        String addrEnd = msgAddr.substring(3);
-                        String dataStr = indvMsg.getString("data");
-
-                        int data[] = {
-                            Integer.parseInt(dataStr.substring(0, 2), 16),
-                            Integer.parseInt(dataStr.substring(2, 4), 16),
-                            Integer.parseInt(dataStr.substring(4, 6), 16),
-                            Integer.parseInt(dataStr.substring(6, 8), 16)
-                        };
-
-                        String[] addresses = {
-                            msgAddr,
-                            addrStart + (addrEnd.equals("0") ? "1" : addrEnd.equals("4") ? "5" : addrEnd.equals("8") ? "9" : "D"),
-                            addrStart + (addrEnd.equals("0") ? "2" : addrEnd.equals("4") ? "6" : addrEnd.equals("8") ? "A" : "E"),
-                            addrStart + (addrEnd.equals("0") ? "3" : addrEnd.equals("4") ? "7" : addrEnd.equals("8") ? "B" : "F")
-                        };
-
-                        for (int i = 0; i < data.length; i++)
+                        try
                         {
-                            updateMap.put(addresses[i], Integer.toString(data[i]));
-                            DATA_MAP.put(addresses[i], Integer.toString(data[i]));
+                            NRODClient.printOut("[TD] " + indvMsg.toString());
+
+                            String binary = paddedBinaryString(Long.parseLong(indvMsg.getString("data"), 16));
+                            int start = Integer.parseInt(indvMsg.getString("address"), 16);
+                            for (int i = 0; i < 4; i++)
+                                for (int j = 0; j < 8; j++)
+                                    updateMap.put(
+                                        String.format("%s%s:%s",
+                                                indvMsg.getString("area_id"),
+                                                zfill(Integer.toHexString(start+i), 2),
+                                                8 - j
+                                        ).toUpperCase(),
+                                        String.valueOf(binary.charAt(8*i+j))
+                                    );
+                            DATA_MAP.putAll(updateMap);
+                        }
+                        catch (Exception e)
+                        {
+                            NRODClient.printThrowable(e, "TD");
+                            NRODClient.printErr("[TD] " + paddedBinaryString(Long.parseLong(indvMsg.getString("data"), 16)));
                         }
                         break;
                     }
                 }
                 
-                if (NRODClient.guiData != null && NRODClient.guiData.isVisible())
-                    NRODClient.guiData.updateData();
-                
-                if (NRODClient.webSocket != null)
-                {
-                    JSONObject container = new JSONObject();
-                    JSONObject message = new JSONObject();
-                    message.put("type", "SEND_UPDATE");
-                    message.put("timestamp", System.currentTimeMillis());
-                    message.put("message", updateMap);
-                    container.put("Message", message);
-
-                    String messageStr = container.toString();
-                    for (WebSocket ws : NRODClient.webSocket.connections())
-                        if (ws != null && ws.isOpen())
-                            ws.send(messageStr);
-                }
             }
             catch (Exception e) { NRODClient.printThrowable(e, "TD"); }
         }
         
+        if (NRODClient.webSocket != null)
+        {
+            Map<String, Map<String, String>> updateAreaMap = new HashMap<>();
+            for (Map.Entry<String, String> e : updateMap.entrySet())
+            {
+                String area = e.getKey().substring(0, 2);
+                Map<String, String> m = updateAreaMap.getOrDefault(area, new HashMap<>());
+                m.put(e.getKey(), e.getValue());
+                updateAreaMap.put(area, m);
+
+                m = updateAreaMap.getOrDefault("", new HashMap<>());
+                m.put(e.getKey(), e.getValue());
+                updateAreaMap.put("", m);
+            }
+
+            Map<String, String> messages = new HashMap<>();
+            for (Map.Entry<String, Map<String, String>> e : updateAreaMap.entrySet())
+            {
+                JSONObject container = new JSONObject();
+                JSONObject message = new JSONObject();
+                message.put("type", "SEND_UPDATE");
+                message.put("timestamp", System.currentTimeMillis());
+                message.put("message", e.getValue());
+                if (!e.getKey().isEmpty())
+                    message.put("area", e.getKey());
+                container.put("Message", message);
+
+                messages.put(e.getKey(), container.toString());
+            }
+            for (WebSocket ws : NRODClient.webSocket.connections())
+                if (ws != null && ws.isOpen() && ws instanceof EASMWebSocketImpl)
+                    ((EASMWebSocketImpl) ws).send(messages);
+        }
         saveTDData(updateMap);
 
         lastMessageTime = System.currentTimeMillis();
@@ -225,9 +241,15 @@ public class TDHandler implements NRODListener
         StompConnectionHandler.ack(headers.get("ack"));
     }
 
-    public static String paddedBinaryString(int i)
+    public static String paddedBinaryString(long i)
     {
-        return String.format("%" + ((int) Math.ceil(Integer.toBinaryString(i).length() / 8f) * 8) + "s", Integer.toBinaryString(i)).replace(" ", "0");
+        String bin = Long.toBinaryString(i);
+        return zfill(bin, (int) Math.ceil(bin.length() / 8f) * 8);
+    }
+    
+    public static String zfill(String s, int len)
+    {
+        return String.format("%"+len+"s", s).replace(" ", "0");
     }
     
     public static void saveTDData(Map<String, String> mapToSave)
@@ -270,37 +292,37 @@ public class TDHandler implements NRODListener
         if (NRODClient.verbose)
         {
             if (toErr)
-                NRODClient.printErr("[TD] ".concat(message));
+                NRODClient.printErr("[TD] [".concat(NRODClient.sdfDateTime.format(new Date(timestamp))).concat("] ").concat(message));
             else
-                NRODClient.printOut("[TD] ".concat(message));
+                NRODClient.printOut("[TD] [".concat(NRODClient.sdfDateTime.format(new Date(timestamp))).concat("] ").concat(message));
         }
 
-        if (!lastLogDate.equals(NRODClient.sdfDate.format(new Date())))
-        {
-            logStream.close();
+        //if (!lastLogDate.equals(NRODClient.sdfDate.format(new Date())))
+        //{
+        //    logStream.close();
 
-            Date logDate = new Date();
-            lastLogDate = NRODClient.sdfDate.format(logDate);
+        //    Date logDate = new Date();
+        //    lastLogDate = NRODClient.sdfDate.format(logDate);
 
-            logFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TD" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".log");
-            logFile.getParentFile().mkdirs();
+        //    logFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TD" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".log");
+        //    logFile.getParentFile().mkdirs();
 
-            try
-            {
-                logFile.createNewFile();
-                logStream = new PrintWriter(new BufferedWriter(new FileWriter(logFile, true)), true);
-            }
-            catch (IOException e) { NRODClient.printThrowable(e, "TD"); }
+        //    try
+        //    {
+        //        logFile.createNewFile();
+        //        logStream = new PrintWriter(new BufferedWriter(new FileWriter(logFile, true)), true);
+        //    }
+        //    catch (IOException e) { NRODClient.printThrowable(e, "TD"); }
             
-            File fileReplaySave = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "ReplaySaves" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".json");
-            fileReplaySave.getParentFile().mkdirs();
-            try (BufferedWriter bw = new BufferedWriter(new FileWriter(fileReplaySave)))
-            {
-                bw.write(new JSONObject().put("TDData", DATA_MAP).toString());
-            }
-            catch (IOException e) { NRODClient.printThrowable(e, "TD"); }
-        }
+        //    File fileReplaySave = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "ReplaySaves" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".json");
+        //    fileReplaySave.getParentFile().mkdirs();
+        //    try (BufferedWriter bw = new BufferedWriter(new FileWriter(fileReplaySave)))
+        //    {
+        //        bw.write(new JSONObject().put("TDData", DATA_MAP).toString());
+        //    }
+        //    catch (IOException e) { NRODClient.printThrowable(e, "TD"); }
+        //}
 
-        logStream.println("[".concat(NRODClient.sdfDateTime.format(new Date(timestamp))).concat("] ").concat(message));
+        //logStream.println("[".concat(NRODClient.sdfDateTime.format(new Date(timestamp))).concat("] ").concat(message));
     }
 }
