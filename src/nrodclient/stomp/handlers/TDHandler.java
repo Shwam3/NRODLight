@@ -21,24 +21,13 @@ import org.json.JSONObject;
 
 public class TDHandler implements NRODListener
 {
-    //private static PrintWriter logStream;
-    //private static File        logFile;
-    //private static String      lastLogDate = "";
-    private long               lastMessageTime = 0;
+   private long lastMessageTime = 0;
     
     private static List<String> areaFilters;
 
     private static NRODListener instance = null;
     private TDHandler()
     {
-        //Date logDate = new Date(System.currentTimeMillis());
-        //logFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TD" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".log");
-        //logFile.getParentFile().mkdirs();
-        //lastLogDate = NRODClient.sdfDate.format(logDate);
-
-        //try { logStream = new PrintWriter(new BufferedWriter(new FileWriter(logFile, true)), true); }
-        //catch (IOException e) { NRODClient.printThrowable(e, "TD"); }
-        
         List<String> filter = new ArrayList<>();
         NRODClient.config.getJSONArray("TD_Area_Filter").forEach(e -> filter.add((String) e));
         filter.sort(null);
@@ -144,7 +133,7 @@ public class TDHandler implements NRODListener
 
                     case "SF_MSG":
                     {
-                        char[] data = paddedBinaryString(Integer.parseInt(indvMsg.getString("data"), 16)).toCharArray();
+                        char[] data = zfill(Integer.parseInt(indvMsg.getString("data"), 16), 8).toCharArray();
 
                         for (int i = 0; i < data.length; i++)
                         {
@@ -170,29 +159,19 @@ public class TDHandler implements NRODListener
                     case "SG_MSG":
                     case "SH_MSG":
                     {
-                        try
-                        {
-                            NRODClient.printOut("[TD] " + indvMsg.toString());
-
-                            String binary = paddedBinaryString(Long.parseLong(indvMsg.getString("data"), 16));
-                            int start = Integer.parseInt(indvMsg.getString("address"), 16);
-                            for (int i = 0; i < 4; i++)
-                                for (int j = 0; j < 8; j++)
-                                    updateMap.put(
-                                        String.format("%s%s:%s",
-                                                indvMsg.getString("area_id"),
-                                                zfill(Integer.toHexString(start+i), 2),
-                                                8 - j
-                                        ).toUpperCase(),
-                                        String.valueOf(binary.charAt(8*i+j))
-                                    );
-                            DATA_MAP.putAll(updateMap);
-                        }
-                        catch (Exception e)
-                        {
-                            NRODClient.printThrowable(e, "TD");
-                            NRODClient.printErr("[TD] " + paddedBinaryString(Long.parseLong(indvMsg.getString("data"), 16)));
-                        }
+                        String binary = zfill(Long.parseLong(indvMsg.getString("data"), 16), 32);
+                        int start = Integer.parseInt(indvMsg.getString("address"), 16);
+                        for (int i = 0; i < 4; i++)
+                            for (int j = 0; j < 8; j++)
+                                updateMap.put(
+                                    String.format("%s%s:%s",
+                                            indvMsg.getString("area_id"),
+                                            zfill(Integer.toHexString(start+i), 2),
+                                            8 - j
+                                    ).toUpperCase(),
+                                    String.valueOf(binary.charAt(8*i+j))
+                                );
+                        DATA_MAP.putAll(updateMap);
                         break;
                     }
                 }
@@ -241,12 +220,10 @@ public class TDHandler implements NRODListener
         StompConnectionHandler.ack(headers.get("ack"));
     }
 
-    public static String paddedBinaryString(long i)
+    public static String zfill(long l, int len)
     {
-        String bin = Long.toBinaryString(i);
-        return zfill(bin, (int) Math.ceil(bin.length() / 8f) * 8);
+        return zfill(String.valueOf(l), len);
     }
-    
     public static String zfill(String s, int len)
     {
         return String.format("%"+len+"s", s).replace(" ", "0");
@@ -296,33 +273,5 @@ public class TDHandler implements NRODListener
             else
                 NRODClient.printOut("[TD] [".concat(NRODClient.sdfDateTime.format(new Date(timestamp))).concat("] ").concat(message));
         }
-
-        //if (!lastLogDate.equals(NRODClient.sdfDate.format(new Date())))
-        //{
-        //    logStream.close();
-
-        //    Date logDate = new Date();
-        //    lastLogDate = NRODClient.sdfDate.format(logDate);
-
-        //    logFile = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "TD" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".log");
-        //    logFile.getParentFile().mkdirs();
-
-        //    try
-        //    {
-        //        logFile.createNewFile();
-        //        logStream = new PrintWriter(new BufferedWriter(new FileWriter(logFile, true)), true);
-        //    }
-        //    catch (IOException e) { NRODClient.printThrowable(e, "TD"); }
-            
-        //    File fileReplaySave = new File(NRODClient.EASM_STORAGE_DIR, "Logs" + File.separator + "ReplaySaves" + File.separator + NRODClient.sdfDate.format(logDate).replace("/", "-") + ".json");
-        //    fileReplaySave.getParentFile().mkdirs();
-        //    try (BufferedWriter bw = new BufferedWriter(new FileWriter(fileReplaySave)))
-        //    {
-        //        bw.write(new JSONObject().put("TDData", DATA_MAP).toString());
-        //    }
-        //    catch (IOException e) { NRODClient.printThrowable(e, "TD"); }
-        //}
-
-        //logStream.println("[".concat(NRODClient.sdfDateTime.format(new Date(timestamp))).concat("] ").concat(message));
     }
 }
