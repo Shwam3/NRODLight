@@ -1,6 +1,6 @@
-package nrodclient.stepping.condition;
+package nrodlight.stepping.condition;
 
-import nrodclient.stomp.handlers.TDHandler;
+import nrodlight.stomp.handlers.TDHandler;
 
 public class SigElement implements BooleanExpression
 {

@@ -1,4 +1,4 @@
-package nrodclient;
+package nrodlight;
 
 import java.awt.AWTException;
 import java.awt.Desktop;
@@ -36,9 +36,9 @@ import java.util.TimerTask;
 import javax.swing.JOptionPane;
 import javax.swing.UIManager;
 import javax.swing.UnsupportedLookAndFeelException;
-import nrodclient.stomp.StompConnectionHandler;
-import nrodclient.stomp.handlers.TDHandler;
-import nrodclient.ws.EASMWebSocket;
+import nrodlight.stomp.StompConnectionHandler;
+import nrodlight.stomp.handlers.TDHandler;
+import nrodlight.ws.EASMWebSocket;
 import org.java_websocket.WebSocket;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -362,7 +362,7 @@ public class NRODClient
 
                 if (sysTrayIcon == null)
                 {
-                    sysTrayIcon = new TrayIcon(Toolkit.getDefaultToolkit().getImage(NRODClient.class.getResource("/nrodclient/resources/TrayIcon.png")), "NROD Light", menu);
+                    sysTrayIcon = new TrayIcon(Toolkit.getDefaultToolkit().getImage(NRODClient.class.getResource("/nrodlight/resources/TrayIcon.png")), "NROD Light", menu);
                     sysTrayIcon.setImageAutoSize(true);
                     sysTrayIcon.addMouseListener(new MouseAdapter()
                     {

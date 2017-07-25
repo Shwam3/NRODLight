@@ -1,4 +1,4 @@
-package nrodclient.stomp;
+package nrodlight.stomp;
 
 import java.io.IOException;
 import java.net.UnknownHostException;
@@ -10,9 +10,9 @@ import java.util.concurrent.TimeUnit;
 import javax.security.auth.login.LoginException;
 import net.ser1.stomp.Listener;
 import net.ser1.stomp.Version;
-import nrodclient.NRODClient;
-import nrodclient.stomp.handlers.ErrorHandler;
-import nrodclient.stomp.handlers.TDHandler;
+import nrodlight.NRODClient;
+import nrodlight.stomp.handlers.ErrorHandler;
+import nrodlight.stomp.handlers.TDHandler;
 
 public class StompConnectionHandler
 {

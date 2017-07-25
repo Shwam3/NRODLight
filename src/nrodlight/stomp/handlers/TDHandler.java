@@ -1,4 +1,4 @@
-package nrodclient.stomp.handlers;
+package nrodlight.stomp.handlers;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -11,10 +11,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import nrodclient.NRODClient;
-import nrodclient.stomp.NRODListener;
-import nrodclient.stomp.StompConnectionHandler;
-import nrodclient.ws.EASMWebSocketImpl;
+import nrodlight.NRODClient;
+import nrodlight.stomp.NRODListener;
+import nrodlight.stomp.StompConnectionHandler;
+import nrodlight.ws.EASMWebSocketImpl;
 import org.java_websocket.WebSocket;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -121,7 +121,6 @@ public class TDHandler implements NRODListener
                     case "CT_MSG":
                     {
                         updateMap.put("XXHB" + indvMsg.getString("area_id"), indvMsg.getString("report_time"));
-                        DATA_MAP.put("XXHB" + indvMsg.getString("area_id"), indvMsg.getString("report_time"));
 
                         printTD(String.format("Heartbeat from %s at time %s",
                                 indvMsg.getString("area_id"),
@@ -133,7 +132,14 @@ public class TDHandler implements NRODListener
 
                     case "SF_MSG":
                     {
-                        char[] data = zfill(Integer.parseInt(indvMsg.getString("data"), 16), 8).toCharArray();
+                        char[] data = zfill(Integer.toBinaryString(Integer.parseInt(indvMsg.getString("data"), 16)), 8).toCharArray();
+                        
+                        String sdata = indvMsg.getString("data");
+                        int idata = Integer.parseInt(sdata, 16);
+                        String binary = Integer.toBinaryString(idata);
+                        char[] data2 = zfill(binary, 8).toCharArray();
+
+                        assert (data2 != data);
 
                         for (int i = 0; i < data.length; i++)
                         {
@@ -151,7 +157,6 @@ public class TDHandler implements NRODListener
 
                                 updateMap.put(address, dataBit);
                             }
-                            DATA_MAP.put(address, dataBit);
                         }
                         break;
                     }
@@ -159,19 +164,18 @@ public class TDHandler implements NRODListener
                     case "SG_MSG":
                     case "SH_MSG":
                     {
-                        String binary = zfill(Long.parseLong(indvMsg.getString("data"), 16), 32);
+                        String binary = zfill(Long.toBinaryString(Long.parseLong(indvMsg.getString("data"), 16)), 32);
                         int start = Integer.parseInt(indvMsg.getString("address"), 16);
                         for (int i = 0; i < 4; i++)
                             for (int j = 0; j < 8; j++)
-                                updateMap.put(
-                                    String.format("%s%s:%s",
-                                            indvMsg.getString("area_id"),
-                                            zfill(Integer.toHexString(start+i), 2),
-                                            8 - j
-                                    ).toUpperCase(),
-                                    String.valueOf(binary.charAt(8*i+j))
-                                );
-                        DATA_MAP.putAll(updateMap);
+                            {
+                                String id = String.format("%s%s:%s",
+                                                indvMsg.getString("area_id"),
+                                                zfill(Integer.toHexString(start+i), 2),
+                                                8 - j
+                                            ).toUpperCase();
+                                updateMap.put(id, String.valueOf(binary.charAt(8*i+j)));
+                            }
                         break;
                     }
                 }
@@ -180,6 +184,7 @@ public class TDHandler implements NRODListener
             catch (Exception e) { NRODClient.printThrowable(e, "TD"); }
         }
         
+        DATA_MAP.putAll(updateMap);
         if (NRODClient.webSocket != null)
         {
             Map<String, Map<String, String>> updateAreaMap = new HashMap<>();

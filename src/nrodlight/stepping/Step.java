@@ -1,4 +1,4 @@
-package nrodclient.stepping;
+package nrodlight.stepping;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
@@ -7,11 +7,11 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import nrodclient.NRODClient;
-import nrodclient.stepping.condition.Lexer;
-import nrodclient.stepping.condition.RecursiveDescentParser;
-import nrodclient.stepping.condition.BooleanExpression;
-import nrodclient.stomp.handlers.TDHandler;
+import nrodlight.NRODClient;
+import nrodlight.stepping.condition.Lexer;
+import nrodlight.stepping.condition.RecursiveDescentParser;
+import nrodlight.stepping.condition.BooleanExpression;
+import nrodlight.stomp.handlers.TDHandler;
 import org.json.JSONObject;
 
 public class Step

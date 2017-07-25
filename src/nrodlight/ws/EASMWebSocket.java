@@ -1,4 +1,4 @@
-package nrodclient.ws;
+package nrodlight.ws;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -23,8 +23,8 @@ import java.util.stream.Collectors;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.xml.bind.DatatypeConverter;
-import nrodclient.NRODClient;
-import nrodclient.stomp.handlers.TDHandler;
+import nrodlight.NRODClient;
+import nrodlight.stomp.handlers.TDHandler;
 import org.java_websocket.WebSocket;
 import org.java_websocket.framing.CloseFrame;
 import org.java_websocket.handshake.ClientHandshake;

@@ -1,4 +1,4 @@
-package nrodclient.stepping.condition;
+package nrodlight.stepping.condition;
 
 public abstract class Terminal implements BooleanExpression
 {

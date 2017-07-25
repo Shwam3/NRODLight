@@ -1,10 +1,10 @@
-package nrodclient.ws;
+package nrodlight.ws;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import nrodclient.stomp.handlers.TDHandler;
+import nrodlight.stomp.handlers.TDHandler;
 import org.java_websocket.WebSocketImpl;
 import org.java_websocket.WebSocketListener;
 import org.java_websocket.drafts.Draft;

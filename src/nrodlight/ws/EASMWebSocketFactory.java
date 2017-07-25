@@ -1,4 +1,4 @@
-package nrodclient.ws;
+package nrodlight.ws;
 
 import java.net.Socket;
 import java.util.List;

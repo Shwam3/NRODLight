@@ -1,4 +1,4 @@
-package nrodclient.stomp;
+package nrodlight.stomp;
 
 import java.io.IOException;
 import java.io.InputStream;

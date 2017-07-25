@@ -1,8 +1,8 @@
-package nrodclient.stomp.handlers;
+package nrodlight.stomp.handlers;
 
 import java.util.Map;
 import net.ser1.stomp.Listener;
-import static nrodclient.stomp.StompConnectionHandler.printStomp;
+import static nrodlight.stomp.StompConnectionHandler.printStomp;
 
 public class ErrorHandler implements Listener
 {
