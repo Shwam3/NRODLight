@@ -23,7 +23,7 @@ import java.util.stream.Collectors;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.xml.bind.DatatypeConverter;
-import nrodlight.NRODClient;
+import nrodlight.NRODLight;
 import nrodlight.stomp.handlers.TDHandler;
 import org.java_websocket.WebSocket;
 import org.java_websocket.framing.CloseFrame;
@@ -50,7 +50,7 @@ public class EASMWebSocket extends WebSocketServer
     private SSLContext getSSLContextFromLetsEncrypt()
     {
         SSLContext context;
-        File certDir = new File(NRODClient.EASM_STORAGE_DIR, "certs");
+        File certDir = new File(NRODLight.EASM_STORAGE_DIR, "certs");
         try
         {
             context = SSLContext.getInstance("TLS");
@@ -76,7 +76,7 @@ public class EASMWebSocket extends WebSocketServer
         }
         catch (IOException | KeyManagementException | KeyStoreException | InvalidKeySpecException | UnrecoverableKeyException | NoSuchAlgorithmException | CertificateException e)
         {
-            NRODClient.printThrowable(e, "WebSocket");
+            NRODLight.printThrowable(e, "WebSocket");
             return null;
         }        
         return context;
@@ -140,7 +140,7 @@ public class EASMWebSocket extends WebSocketServer
             printWebSocket("Error (" + conn.getRemoteSocketAddress().getAddress().getHostAddress() + "):", true);
             conn.close(CloseFrame.ABNORMAL_CLOSE, ex.getMessage());
         }
-        NRODClient.printThrowable(ex, "WebSocket" + (conn != null ? "-" + conn.getRemoteSocketAddress().getAddress().getHostAddress() : ""));
+        NRODLight.printThrowable(ex, "WebSocket" + (conn != null ? "-" + conn.getRemoteSocketAddress().getAddress().getHostAddress() : ""));
     }
 
     @Override
@@ -157,8 +157,8 @@ public class EASMWebSocket extends WebSocketServer
     public static void printWebSocket(String message, boolean toErr)
     {
         if (toErr)
-            NRODClient.printErr("[WebSocket] " + message);
+            NRODLight.printErr("[WebSocket] " + message);
         else
-            NRODClient.printOut("[WebSocket] " + message);
+            NRODLight.printOut("[WebSocket] " + message);
     }
 }

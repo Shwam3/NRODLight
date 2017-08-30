@@ -3,10 +3,7 @@ package nrodlight;
 import java.awt.AWTException;
 import java.awt.Desktop;
 import java.awt.MenuItem;
-import java.awt.MouseInfo;
-import java.awt.Point;
 import java.awt.PopupMenu;
-import java.awt.Robot;
 import java.awt.SystemTray;
 import java.awt.Toolkit;
 import java.awt.TrayIcon;
@@ -23,14 +20,13 @@ import java.io.PrintStream;
 import java.lang.management.ManagementFactory;
 import java.security.GeneralSecurityException;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.Timer;
 import java.util.TimerTask;
 import javax.swing.JOptionPane;
@@ -43,7 +39,7 @@ import org.java_websocket.WebSocket;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-public class NRODClient
+public class NRODLight
 {
     public static final String VERSION = "3";
 
@@ -52,14 +48,13 @@ public class NRODClient
     public static final File EASM_STORAGE_DIR = new File(System.getProperty("user.home", "C:") + File.separator + ".easigmap");
     public static JSONObject config = new JSONObject();
 
-    public static SimpleDateFormat sdfTime          = new SimpleDateFormat("HH:mm:ss");
-    public static SimpleDateFormat sdfDate          = new SimpleDateFormat("dd/MM/yy");
-    public static SimpleDateFormat sdfDateTime      = new SimpleDateFormat("dd/MM/yy HH:mm:ss");
-    public static SimpleDateFormat sdfDateTimeShort = new SimpleDateFormat("dd/MM HH:mm:ss");
+    public static final SimpleDateFormat sdfTime;
+    public static final SimpleDateFormat sdfDate;
+    public static final SimpleDateFormat sdfDateTime;
 
-    public  static PrintStream  logStream;
-    private static File         logFile;
-    private static String       lastLogDate = "";
+    public  static PrintStream logStream;
+    private static File        logFile;
+    private static String      lastLogDate = "";
     
     private static TrayIcon sysTrayIcon = null;
     
@@ -69,11 +64,20 @@ public class NRODClient
     public static PrintStream stdOut = System.out;
     public static PrintStream stdErr = System.err;
     
+    static
+    {
+        TimeZone.setDefault(TimeZone.getTimeZone("Europe/London"));
+        
+        sdfTime     = new SimpleDateFormat("HH:mm:ss");
+        sdfDate     = new SimpleDateFormat("dd/MM/yy");
+        sdfDateTime = new SimpleDateFormat("dd/MM/yy HH:mm:ss");
+    }
+    
     public static void main(String[] args) throws IOException, GeneralSecurityException
     {
         try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()); }
         catch (ClassNotFoundException | InstantiationException | IllegalAccessException | UnsupportedLookAndFeelException e) { printThrowable(e, "Look & Feel"); }
-
+        
         Date logDate = new Date();
         logFile = new File(EASM_STORAGE_DIR, "Logs" + File.separator + "NRODLight" + File.separator + sdfDate.format(logDate).replace("/", "-") + ".log");
         logFile.getParentFile().mkdirs();
@@ -87,11 +91,13 @@ public class NRODClient
         }
         catch (FileNotFoundException e) { printErr("Could not create log file"); printThrowable(e, "Startup"); }
         
+        printOut("[Main] Starting... (v" + VERSION + ")");
+        
         reloadConfig();
         
         try
         {
-            File TDDataDir = new File(NRODClient.EASM_STORAGE_DIR, "TDData");
+            File TDDataDir = new File(NRODLight.EASM_STORAGE_DIR, "TDData");
             for (File perAreaDir : TDDataDir.listFiles())
             {
                 String area = perAreaDir.getName();
@@ -110,13 +116,26 @@ public class NRODClient
                     {
                         data = br.readLine();
                     }
-                    catch (IOException ex) { NRODClient.printThrowable(ex, "TD-Startup"); }
+                    catch (IOException ex) { NRODLight.printThrowable(ex, "TD-Startup"); }
 
                     TDHandler.DATA_MAP.put(area + dataID.substring(0, 4), data == null ? "" : data);
                 }
             }
         }
-        catch (Exception e) { NRODClient.printThrowable(e, "TD-Startup"); }
+        catch (Exception e) { NRODLight.printThrowable(e, "TD-Startup"); }
+        
+        Runtime.getRuntime().addShutdownHook(new Thread(() ->
+        {
+            printOut("[Main] Stopping...");
+            
+            if (webSocket != null)
+            {
+                try { webSocket.stop(1000); }
+                catch (Throwable t) {}
+            }
+            
+            StompConnectionHandler.disconnect();
+        }));
         
         ensureServerOpen();
         
@@ -125,21 +144,6 @@ public class NRODClient
         else
             StompConnectionHandler.printStomp("Unble to start", true);
 
-        Timer sleepTimer = new Timer("sleepTimer", true);
-        sleepTimer.scheduleAtFixedRate(new TimerTask()
-        {
-            @Override
-            public void run()
-            {
-                try
-                {
-                    Point mouseLoc = MouseInfo.getPointerInfo().getLocation();
-                    new Robot().mouseMove(mouseLoc.x, mouseLoc.y);
-                }
-                catch (NullPointerException e) {}
-                catch (Exception e) { printErr("[Timer] Exception: " + e.toString()); }
-            }
-        }, 30000, 30000);
         Timer FullUpdateMessenger = new Timer("FullUpdateMessenger");
         FullUpdateMessenger.schedule(new TimerTask()
         {
@@ -243,7 +247,7 @@ public class NRODClient
 
             lastLogDate = sdfDate.format(logDate);
 
-            logFile = new File(EASM_STORAGE_DIR, "Logs" + File.separator + "NRODClient" + File.separator + lastLogDate.replace("/", "-") + ".log");
+            logFile = new File(EASM_STORAGE_DIR, "Logs" + File.separator + "NRODLight" + File.separator + lastLogDate.replace("/", "-") + ".log");
             logFile.getParentFile().mkdirs();
 
             try
@@ -277,9 +281,9 @@ public class NRODClient
 
                 itemStatus.addActionListener((ActionEvent e) ->
                 {
-                    NRODClient.updatePopupMenu();
+                    NRODLight.updatePopupMenu();
                     
-                    Collection<WebSocket> connsSSL = Collections.unmodifiableCollection(NRODClient.webSocket.connections());
+                    Collection<WebSocket> connsSSL = Collections.unmodifiableCollection(NRODLight.webSocket.connections());
                     StringBuilder statusMsg = new StringBuilder();
                     statusMsg.append("WebSocket:");
                     statusMsg.append("\n  Connections: ").append(connsSSL.size());
@@ -290,10 +294,10 @@ public class NRODClient
                     statusMsg.append("\n  Timeout: ").append((System.currentTimeMillis() - StompConnectionHandler.lastMessageTimeGeneral) / 1000f).append("s");
                     statusMsg.append("\n  Subscriptions:");
                     statusMsg.append("\n    TD: ").append(String.format("%s - %.2fs", StompConnectionHandler.isSubscribedTD() ? "Yes" : "No", TDHandler.getInstance().getTimeout() / 1000f));
-                    statusMsg.append("\nLogfile: \"").append(NRODClient.logFile.getName()).append("\"");
-                    statusMsg.append("\nStarted: ").append(NRODClient.sdfDateTime.format(ManagementFactory.getRuntimeMXBean().getStartTime()));
+                    statusMsg.append("\nLogfile: \"").append(NRODLight.logFile.getName()).append("\"");
+                    statusMsg.append("\nStarted: ").append(NRODLight.sdfDateTime.format(ManagementFactory.getRuntimeMXBean().getStartTime()));
                     
-                    JOptionPane.showMessageDialog(null, statusMsg.toString(), "NRODClient - Status", JOptionPane.INFORMATION_MESSAGE);
+                    JOptionPane.showMessageDialog(null, statusMsg.toString(), "NRODLight - Status", JOptionPane.INFORMATION_MESSAGE);
                 });
                 itemInputData.addActionListener(e ->
                 {
@@ -318,7 +322,7 @@ public class NRODClient
                         TDHandler.saveTDData(updateMap);
 
                         String messageStr = container.toString();
-                        NRODClient.webSocket.connections().stream()
+                        NRODLight.webSocket.connections().stream()
                                 .filter(c -> c != null)
                                 .filter(c -> c.isOpen())
                                 .forEach(c -> c.send(messageStr));
@@ -334,19 +338,19 @@ public class NRODClient
                 });
                 itemOpenLog.addActionListener((ActionEvent evt) ->
                 {
-                    try { Desktop.getDesktop().open(NRODClient.logFile); }
+                    try { Desktop.getDesktop().open(NRODLight.logFile); }
                     catch (IOException e) {}
                 });
                 itemOpenLogFolder.addActionListener((ActionEvent evt) ->
                 {
-                    try { Runtime.getRuntime().exec("explorer.exe /select," + NRODClient.logFile); }
+                    try { Runtime.getRuntime().exec("explorer.exe /select," + NRODLight.logFile); }
                     catch (IOException e) {}
                 });
                 itemExit.addActionListener((ActionEvent e) ->
                 {
                     if (JOptionPane.showConfirmDialog(null, "Are you sure you wish to exit?", "Confirmation", JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION)
                     {
-                        NRODClient.printOut("[Main] Stopping");
+                        NRODLight.printOut("[Main] Stopping");
                         System.exit(0);
                     }
                 });
@@ -362,7 +366,7 @@ public class NRODClient
 
                 if (sysTrayIcon == null)
                 {
-                    sysTrayIcon = new TrayIcon(Toolkit.getDefaultToolkit().getImage(NRODClient.class.getResource("/nrodlight/resources/TrayIcon.png")), "NROD Light", menu);
+                    sysTrayIcon = new TrayIcon(Toolkit.getDefaultToolkit().getImage(NRODLight.class.getResource("/nrodlight/resources/TrayIcon.png")), "NROD Light", menu);
                     sysTrayIcon.setImageAutoSize(true);
                     sysTrayIcon.addMouseListener(new MouseAdapter()
                     {
@@ -428,11 +432,6 @@ public class NRODClient
             
             JSONObject obj = new JSONObject(sb.toString());
             config = obj;
-        } catch (IOException | JSONException e) { NRODClient.printThrowable(e, "Config"); }
-        
-        List<String> filter = new ArrayList<>();
-        config.getJSONArray("TD_Area_Filter").forEach(e -> filter.add((String) e));
-        filter.sort(null);
-        TDHandler.setAreaFilter(filter);
+        } catch (IOException | JSONException e) { NRODLight.printThrowable(e, "Config"); }
     }
 }

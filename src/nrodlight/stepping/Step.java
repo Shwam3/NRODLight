@@ -7,7 +7,7 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import nrodlight.NRODClient;
+import nrodlight.NRODLight;
 import nrodlight.stepping.condition.Lexer;
 import nrodlight.stepping.condition.RecursiveDescentParser;
 import nrodlight.stepping.condition.BooleanExpression;
@@ -20,7 +20,7 @@ public class Step
     
     public void initialise()
     {
-        File stepFile = new File(NRODClient.EASM_STORAGE_DIR, "stepping.json");
+        File stepFile = new File(NRODLight.EASM_STORAGE_DIR, "stepping.json");
         if (stepFile.exists() && stepFile.canRead())
         {
             StringBuilder sb = new StringBuilder();
@@ -30,7 +30,7 @@ public class Step
                 while ((line = br.readLine()) != null)
                     sb.append(line);
             }
-            catch (IOException ex) { NRODClient.printThrowable(ex, "Stepping"); }
+            catch (IOException ex) { NRODLight.printThrowable(ex, "Stepping"); }
             
         }
     }

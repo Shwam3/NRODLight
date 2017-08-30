@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit;
 import javax.security.auth.login.LoginException;
 import net.ser1.stomp.Listener;
 import net.ser1.stomp.Version;
-import nrodlight.NRODClient;
+import nrodlight.NRODLight;
 import nrodlight.stomp.handlers.ErrorHandler;
 import nrodlight.stomp.handlers.TDHandler;
 
@@ -33,13 +33,13 @@ public class StompConnectionHandler
     {
         printStomp(Version.VERSION, false);
 
-        subscribedTD    = false;
+        subscribedTD = false;
 
-        NRODClient.reloadConfig();
-        String username = NRODClient.config.optString("NROD_Username", "");
-        String password = NRODClient.config.optString("NROD_Password", "");
+        NRODLight.reloadConfig();
+        String username = NRODLight.config.optString("NROD_Username", "");
+        String password = NRODLight.config.optString("NROD_Password", "");
 
-        appID = username + "-NRODLight-v" + NRODClient.VERSION;
+        appID = username + "-NRODLight-" + NRODLight.config.optString("NROD_Instance_ID", "uid") + "-v" + NRODLight.VERSION;
 
         if ((username != null && username.equals("")) || (password != null && password.equals("")))
         {
@@ -66,7 +66,7 @@ public class StompConnectionHandler
         client.addErrorListener(new ErrorHandler());
         toggleTD();
         
-        NRODClient.updatePopupMenu();
+        NRODLight.updatePopupMenu();
 
         try { Thread.sleep(100); }
         catch (InterruptedException e) {}
@@ -80,6 +80,8 @@ public class StompConnectionHandler
             client.disconnect();
 
         subscribedTD = false;
+        
+        printStomp("Disconnected", false);
     }
 
     public static boolean isConnected()
@@ -118,8 +120,8 @@ public class StompConnectionHandler
         }
         catch (LoginException e)       { printStomp("Login Exception: " + e.getLocalizedMessage().split("\n")[0], true); }
         catch (UnknownHostException e) { printStomp("Unable to resolve host (datafeeds.networkrail.co.uk)", true); }
-        catch (IOException e)          { printStomp("IO Exception:", true); NRODClient.printThrowable(e, "Stomp"); }
-        catch (Exception e)            { printStomp("Exception:", true); NRODClient.printThrowable(e, "Stomp"); }
+        catch (IOException e)          { printStomp("IO Exception:", true); NRODLight.printThrowable(e, "Stomp"); }
+        catch (Exception e)            { printStomp("Exception:", true); NRODLight.printThrowable(e, "Stomp"); }
 
         return false;
     }
@@ -161,8 +163,8 @@ public class StompConnectionHandler
                         connect();
                     }
                     catch (LoginException e) { printStomp("Login Exception: " + e.getLocalizedMessage().split("\n")[0], true);}
-                    catch (IOException e)    { printStomp("IO Exception reconnecting", true); NRODClient.printThrowable(e, "Stomp"); }
-                    catch (Exception e)      { printStomp("Exception reconnecting", true);  NRODClient.printThrowable(e, "Stomp"); }
+                    catch (IOException e)    { printStomp("IO Exception reconnecting", true); NRODLight.printThrowable(e, "Stomp"); }
+                    catch (Exception e)      { printStomp("Exception reconnecting", true);  NRODLight.printThrowable(e, "Stomp"); }
                 }
                 else
                 {
@@ -205,9 +207,9 @@ public class StompConnectionHandler
     public static void printStomp(String message, boolean toErr)
     {
         if (toErr)
-            NRODClient.printErr("[Stomp] " + message);
+            NRODLight.printErr("[Stomp] " + message);
         else
-            NRODClient.printOut("[Stomp] " + message);
+            NRODLight.printOut("[Stomp] " + message);
     }
 
     public static String getConnectionName() { return appID; }
@@ -238,12 +240,11 @@ public class StompConnectionHandler
 
     public static void printStompHeaders(Map<String, String> headers)
     {
-        printStomp(
-            String.format("Message received (topic: %s, time: %s, delay: %s, expires: %s, id: %s, ack: %s, subscription: %s, persistent: %s%s)",
+        printStomp(String.format("Message received (topic: %s, time: %s, delay: %s, expires: %s, id: %s, ack: %s, subscription: %s, persistent: %s%s)",
                 String.valueOf(headers.get("destination")).replace("\\c", ":"),
-                NRODClient.sdfTime.format(new Date(Long.parseLong(headers.get("timestamp")))),
+                NRODLight.sdfTime.format(new Date(Long.parseLong(headers.get("timestamp")))),
                 (System.currentTimeMillis() - Long.parseLong(headers.get("timestamp")))/1000f + "s",
-                NRODClient.sdfTime.format(new Date(Long.parseLong(headers.get("expires")))),
+                NRODLight.sdfTime.format(new Date(Long.parseLong(headers.get("expires")))),
                 String.valueOf(headers.get("message-id")).replace("\\c", ":"),
                 String.valueOf(headers.get("ack")).replace("\\c", ":"),
                 String.valueOf(headers.get("subscription")).replace("\\c", ":"),

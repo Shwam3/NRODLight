@@ -4,14 +4,11 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import nrodlight.NRODClient;
+import nrodlight.NRODLight;
 import nrodlight.stomp.NRODListener;
 import nrodlight.stomp.StompConnectionHandler;
 import nrodlight.ws.EASMWebSocketImpl;
@@ -21,18 +18,11 @@ import org.json.JSONObject;
 
 public class TDHandler implements NRODListener
 {
-   private long lastMessageTime = 0;
+    private long lastMessageTime = 0;
     
-    private static List<String> areaFilters;
-
     private static NRODListener instance = null;
     private TDHandler()
     {
-        List<String> filter = new ArrayList<>();
-        NRODClient.config.getJSONArray("TD_Area_Filter").forEach(e -> filter.add((String) e));
-        filter.sort(null);
-        setAreaFilter(filter);
-        
         saveTDData(DATA_MAP);
 
         lastMessageTime = System.currentTimeMillis();
@@ -43,12 +33,6 @@ public class TDHandler implements NRODListener
             instance = new TDHandler();
 
         return instance;
-    }
-    
-    public static void setAreaFilter(List<String> newFilter)
-    {
-        newFilter.sort(null);
-        areaFilters = Collections.unmodifiableList(newFilter);
     }
 
     public static final Map<String, String> DATA_MAP = new ConcurrentHashMap<>();
@@ -68,25 +52,24 @@ public class TDHandler implements NRODListener
             {
                 String msgType = String.valueOf(map.keySet().toArray()[0]);
                 JSONObject indvMsg = map.getJSONObject(msgType);
-                if (!areaFilters.contains(indvMsg.getString("area_id")))
-                    continue;
-
+                
                 String msgAddr = indvMsg.getString("area_id") + indvMsg.optString("address");
-
+                
                 switch (msgType.toUpperCase())
                 {
                     case "CA_MSG":
                     {
-                        if (!"".equals(DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "")));
-                            updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "");
+                        if (!"".equals(DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("from").replace("*", "-"), "")));
+                            updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("from").replace("*", "-"), "");
                             
-                        if (!indvMsg.getString("descr").equals(DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"))));
-                            updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"));
+                        if (!indvMsg.getString("descr").equals(DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("to").replace("*", "-"), indvMsg.getString("descr"))));
+                            updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("to").replace("*", "-"), indvMsg.getString("descr"));
 
                         printTD(String.format("Step %s from %s to %s",
                                 indvMsg.getString("descr"),
-                                indvMsg.getString("area_id") + indvMsg.getString("from"),
-                                indvMsg.getString("area_id") + indvMsg.getString("to")),
+                                indvMsg.getString("area_id") + indvMsg.getString("from").replace("*", "-"),
+                                indvMsg.getString("area_id") + indvMsg.getString("to").replace("*", "-")
+                            ),
                             false,
                             Long.parseLong(indvMsg.getString("time")));
                         break;
@@ -94,12 +77,13 @@ public class TDHandler implements NRODListener
                     
                     case "CB_MSG":
                     {
-                        if (!"".equals(DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "")))
-                            updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("from"), "");
+                        if (!"".equals(DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("from").replace("*", "-"), "")))
+                            updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("from").replace("*", "-"), "");
 
                         printTD(String.format("Cancel %s from %s",
                                 indvMsg.getString("descr"),
-                                indvMsg.getString("area_id") + indvMsg.getString("from")),
+                                indvMsg.getString("area_id") + indvMsg.getString("from").replace("*", "-")
+                            ),
                             false,
                             Long.parseLong(indvMsg.getString("time")));
                         break;
@@ -107,12 +91,13 @@ public class TDHandler implements NRODListener
                     
                     case "CC_MSG":
                     {
-                        if (!indvMsg.getString("descr").equals(DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"))));
-                            updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("to"), indvMsg.getString("descr"));
+                        if (!indvMsg.getString("descr").equals(DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("to").replace("*", "-"), indvMsg.getString("descr"))));
+                            updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("to").replace("*", "-"), indvMsg.getString("descr"));
 
                         printTD(String.format("Interpose %s to %s",
                                 indvMsg.getString("descr"),
-                                indvMsg.getString("area_id") + indvMsg.getString("to")),
+                                indvMsg.getString("area_id") + indvMsg.getString("to").replace("*", "-")
+                            ),
                             false,
                             Long.parseLong(indvMsg.getString("time")));
                         break;
@@ -124,7 +109,8 @@ public class TDHandler implements NRODListener
 
                         printTD(String.format("Heartbeat from %s at time %s",
                                 indvMsg.getString("area_id"),
-                                indvMsg.getString("report_time")),
+                                indvMsg.getString("report_time")
+                            ),
                             false,
                             Long.parseLong(indvMsg.getString("time")));
                         break;
@@ -151,7 +137,8 @@ public class TDHandler implements NRODListener
                                 printTD(String.format("Change %s from %s to %s",
                                         address,
                                         DATA_MAP.getOrDefault(address, "0"),
-                                        dataBit),
+                                        dataBit
+                                    ),
                                     false,
                                     Long.parseLong(indvMsg.getString("time")));
 
@@ -181,11 +168,11 @@ public class TDHandler implements NRODListener
                 }
                 
             }
-            catch (Exception e) { NRODClient.printThrowable(e, "TD"); }
+            catch (Exception e) { NRODLight.printThrowable(e, "TD"); }
         }
         
         DATA_MAP.putAll(updateMap);
-        if (NRODClient.webSocket != null)
+        if (NRODLight.webSocket != null)
         {
             Map<String, Map<String, String>> updateAreaMap = new HashMap<>();
             for (Map.Entry<String, String> e : updateMap.entrySet())
@@ -214,7 +201,7 @@ public class TDHandler implements NRODListener
 
                 messages.put(e.getKey(), container.toString());
             }
-            for (WebSocket ws : NRODClient.webSocket.connections())
+            for (WebSocket ws : NRODLight.webSocket.connections())
                 if (ws != null && ws.isOpen() && ws instanceof EASMWebSocketImpl)
                     ((EASMWebSocketImpl) ws).send(messages);
         }
@@ -236,7 +223,7 @@ public class TDHandler implements NRODListener
     
     public static void saveTDData(Map<String, String> mapToSave)
     {
-        File TDDataDir = new File(NRODClient.EASM_STORAGE_DIR, "TDData");
+        File TDDataDir = new File(NRODLight.EASM_STORAGE_DIR, "TDData");
         if (!mapToSave.isEmpty())
         {
             mapToSave.keySet().stream().forEach(key ->
@@ -253,7 +240,7 @@ public class TDHandler implements NRODListener
                         DataFile.getParentFile().mkdirs();
                         DataFile.createNewFile();
                     }
-                    catch (IOException ex) { NRODClient.printThrowable(ex, "TD"); }
+                    catch (IOException ex) { NRODLight.printThrowable(ex, "TD"); }
                 }
                                 
                 try (BufferedWriter bw = new BufferedWriter(new FileWriter(DataFile, false)))
@@ -261,7 +248,7 @@ public class TDHandler implements NRODListener
                     bw.write(mapToSave.getOrDefault(key, ""));
                     bw.newLine();
                 }
-                catch (IOException ex) { NRODClient.printThrowable(ex, "TD"); }
+                catch (IOException ex) { NRODLight.printThrowable(ex, "TD"); }
             });
         }
     }
@@ -271,12 +258,12 @@ public class TDHandler implements NRODListener
 
     private void printTD(String message, boolean toErr, long timestamp)
     {
-        if (NRODClient.verbose)
+        if (NRODLight.verbose)
         {
             if (toErr)
-                NRODClient.printErr("[TD] [".concat(NRODClient.sdfDateTime.format(new Date(timestamp))).concat("] ").concat(message));
+                NRODLight.printErr("[TD] [".concat(NRODLight.sdfDateTime.format(new Date(timestamp))).concat("] ").concat(message));
             else
-                NRODClient.printOut("[TD] [".concat(NRODClient.sdfDateTime.format(new Date(timestamp))).concat("] ").concat(message));
+                NRODLight.printOut("[TD] [".concat(NRODLight.sdfDateTime.format(new Date(timestamp))).concat("] ").concat(message));
         }
     }
 }
