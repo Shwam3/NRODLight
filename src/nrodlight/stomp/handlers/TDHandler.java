@@ -6,9 +6,12 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import nrodlight.NRODLight;
+import nrodlight.RateMonitor;
 import nrodlight.stomp.NRODListener;
 import nrodlight.stomp.StompConnectionHandler;
 import nrodlight.ws.EASMWebSocketImpl;
@@ -44,6 +47,7 @@ public class TDHandler implements NRODListener
 
         JSONArray messageList = new JSONArray(body);
         Map<String, String> updateMap = new HashMap<>();
+        int updateCount = 0;
 
         for (Object mapObj : messageList)
         {
@@ -59,11 +63,8 @@ public class TDHandler implements NRODListener
                 {
                     case "CA_MSG":
                     {
-                        if (!"".equals(DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("from").replace("*", "-"), "")));
-                            updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("from").replace("*", "-"), "");
-                            
-                        if (!indvMsg.getString("descr").equals(DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("to").replace("*", "-"), indvMsg.getString("descr"))));
-                            updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("to").replace("*", "-"), indvMsg.getString("descr"));
+                        updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("from").replace("*", "-"), "");
+                        updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("to").replace("*", "-"), indvMsg.getString("descr"));
 
                         printTD(String.format("Step %s from %s to %s",
                                 indvMsg.getString("descr"),
@@ -72,13 +73,13 @@ public class TDHandler implements NRODListener
                             ),
                             false,
                             Long.parseLong(indvMsg.getString("time")));
+                        updateCount++;
                         break;
                     }
                     
                     case "CB_MSG":
                     {
-                        if (!"".equals(DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("from").replace("*", "-"), "")))
-                            updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("from").replace("*", "-"), "");
+                        updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("from").replace("*", "-"), "");
 
                         printTD(String.format("Cancel %s from %s",
                                 indvMsg.getString("descr"),
@@ -86,13 +87,13 @@ public class TDHandler implements NRODListener
                             ),
                             false,
                             Long.parseLong(indvMsg.getString("time")));
+                        updateCount++;
                         break;
                     }
                     
                     case "CC_MSG":
                     {
-                        if (!indvMsg.getString("descr").equals(DATA_MAP.put(indvMsg.getString("area_id") + indvMsg.getString("to").replace("*", "-"), indvMsg.getString("descr"))));
-                            updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("to").replace("*", "-"), indvMsg.getString("descr"));
+                        updateMap.put(indvMsg.getString("area_id") + indvMsg.getString("to").replace("*", "-"), indvMsg.getString("descr"));
 
                         printTD(String.format("Interpose %s to %s",
                                 indvMsg.getString("descr"),
@@ -100,6 +101,7 @@ public class TDHandler implements NRODListener
                             ),
                             false,
                             Long.parseLong(indvMsg.getString("time")));
+                        updateCount++;
                         break;
                     }
                     
@@ -113,6 +115,7 @@ public class TDHandler implements NRODListener
                             ),
                             false,
                             Long.parseLong(indvMsg.getString("time")));
+                        updateCount++;
                         break;
                     }
 
@@ -120,13 +123,6 @@ public class TDHandler implements NRODListener
                     {
                         char[] data = zfill(Integer.toBinaryString(Integer.parseInt(indvMsg.getString("data"), 16)), 8).toCharArray();
                         
-                        String sdata = indvMsg.getString("data");
-                        int idata = Integer.parseInt(sdata, 16);
-                        String binary = Integer.toBinaryString(idata);
-                        char[] data2 = zfill(binary, 8).toCharArray();
-
-                        assert (data2 != data);
-
                         for (int i = 0; i < data.length; i++)
                         {
                             String address = msgAddr + ":" + Integer.toString(8 - i);
@@ -141,9 +137,9 @@ public class TDHandler implements NRODListener
                                     ),
                                     false,
                                     Long.parseLong(indvMsg.getString("time")));
-
-                                updateMap.put(address, dataBit);
+                                updateCount++;
                             }
+                            updateMap.put(address, dataBit);
                         }
                         break;
                     }
@@ -161,7 +157,19 @@ public class TDHandler implements NRODListener
                                                 zfill(Integer.toHexString(start+i), 2),
                                                 8 - j
                                             ).toUpperCase();
-                                updateMap.put(id, String.valueOf(binary.charAt(8*i+j)));
+                                String dat = String.valueOf(binary.charAt(8*i+j));
+                                updateMap.put(id, dat);
+                                if (!DATA_MAP.containsKey(id) || DATA_MAP.get(id) == null || dat.equals(DATA_MAP.get(id)))
+                                {
+                                    printTD(String.format("Change %s from %s to %s",
+                                            id,
+                                            DATA_MAP.getOrDefault(id, "0"),
+                                            dat
+                                        ),
+                                        false,
+                                        Long.parseLong(indvMsg.getString("time")));
+                                    updateCount++;
+                                }
                             }
                         break;
                     }
@@ -181,10 +189,6 @@ public class TDHandler implements NRODListener
                 Map<String, String> m = updateAreaMap.getOrDefault(area, new HashMap<>());
                 m.put(e.getKey(), e.getValue());
                 updateAreaMap.put(area, m);
-
-                m = updateAreaMap.getOrDefault("", new HashMap<>());
-                m.put(e.getKey(), e.getValue());
-                updateAreaMap.put("", m);
             }
 
             Map<String, String> messages = new HashMap<>();
@@ -202,10 +206,11 @@ public class TDHandler implements NRODListener
                 messages.put(e.getKey(), container.toString());
             }
             for (WebSocket ws : NRODLight.webSocket.connections())
-                if (ws != null && ws.isOpen() && ws instanceof EASMWebSocketImpl)
+                if (ws instanceof EASMWebSocketImpl)
                     ((EASMWebSocketImpl) ws).send(messages);
         }
         saveTDData(updateMap);
+        RateMonitor.getInstance().onTDMessage((System.currentTimeMillis() - Long.parseLong(headers.get("timestamp")))/1000f, updateCount);
 
         lastMessageTime = System.currentTimeMillis();
         StompConnectionHandler.lastMessageTimeGeneral = lastMessageTime;
@@ -226,27 +231,57 @@ public class TDHandler implements NRODListener
         File TDDataDir = new File(NRODLight.EASM_STORAGE_DIR, "TDData");
         if (!mapToSave.isEmpty())
         {
-            mapToSave.keySet().stream().forEach(key ->
+            Set<String> cClAreas = new HashSet<>();
+            JSONObject cClObj = new JSONObject();
+            
+            Set<String> sClAreas = new HashSet<>();
+            JSONObject sClObj = new JSONObject();
+            
+            mapToSave.keySet().forEach(key ->
             {
-                File DataFile = new File(TDDataDir, key.substring(0, 2) + File.separator + key.substring(2).replace(":", "-") + ".td");
-                
-                if (key.length() != 6)
-                    return;
-                
-                if (!DataFile.exists())
+                String area = key.substring(0, 2);
+                if (key.charAt(4) == ':')
                 {
-                    try
-                    {
-                        DataFile.getParentFile().mkdirs();
-                        DataFile.createNewFile();
-                    }
-                    catch (IOException ex) { NRODLight.printThrowable(ex, "TD"); }
+                    sClAreas.add(area);
+                    sClObj.put(area, new JSONObject());
                 }
-                                
-                try (BufferedWriter bw = new BufferedWriter(new FileWriter(DataFile, false)))
+                else
                 {
-                    bw.write(mapToSave.getOrDefault(key, ""));
-                    bw.newLine();
+                    cClAreas.add(area);
+                    cClObj.put(area, new JSONObject());
+                }
+            });
+            
+            DATA_MAP.forEach((k, v) ->
+            {
+                String area = k.substring(0, 2);
+                if (k.charAt(4) == ':')
+                {
+                    if (sClAreas.contains(area))
+                        sClObj.getJSONObject(area).put(k, v);
+                }
+                else
+                {
+                    if (cClAreas.contains(area))
+                        cClObj.getJSONObject(area).put(k, v);
+                }
+            });
+            
+            sClObj.keys().forEachRemaining(k ->
+            {
+                String out = sClObj.getJSONObject(k).toString();
+                try(BufferedWriter bw = new BufferedWriter(new FileWriter(new File(TDDataDir, k+".s.td"))))
+                {
+                    bw.write(out);
+                }
+                catch (IOException ex) { NRODLight.printThrowable(ex, "TD"); }
+            });
+            cClObj.keys().forEachRemaining(k ->
+            {
+                String out = cClObj.getJSONObject(k).toString();
+                try(BufferedWriter bw = new BufferedWriter(new FileWriter(new File(TDDataDir, k+".c.td"))))
+                {
+                    bw.write(out);
                 }
                 catch (IOException ex) { NRODLight.printThrowable(ex, "TD"); }
             });

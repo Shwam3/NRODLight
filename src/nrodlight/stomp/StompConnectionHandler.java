@@ -65,8 +65,6 @@ public class StompConnectionHandler
 
         client.addErrorListener(new ErrorHandler());
         toggleTD();
-        
-        NRODLight.updatePopupMenu();
 
         try { Thread.sleep(100); }
         catch (InterruptedException e) {}

@@ -1,15 +1,5 @@
 package nrodlight;
 
-import java.awt.AWTException;
-import java.awt.Desktop;
-import java.awt.MenuItem;
-import java.awt.PopupMenu;
-import java.awt.SystemTray;
-import java.awt.Toolkit;
-import java.awt.TrayIcon;
-import java.awt.event.ActionEvent;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -17,25 +7,17 @@ import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.PrintStream;
-import java.lang.management.ManagementFactory;
-import java.security.GeneralSecurityException;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.TimeZone;
 import java.util.Timer;
 import java.util.TimerTask;
-import javax.swing.JOptionPane;
 import javax.swing.UIManager;
 import javax.swing.UnsupportedLookAndFeelException;
 import nrodlight.stomp.StompConnectionHandler;
 import nrodlight.stomp.handlers.TDHandler;
 import nrodlight.ws.EASMWebSocket;
-import org.java_websocket.WebSocket;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -55,10 +37,8 @@ public class NRODLight
     public  static PrintStream logStream;
     private static File        logFile;
     private static String      lastLogDate = "";
-    
-    private static TrayIcon sysTrayIcon = null;
-    
-    public static final int     port = 6423;
+        
+    public static final int     port = 8443;
     public static EASMWebSocket webSocket;
 
     public static PrintStream stdOut = System.out;
@@ -73,7 +53,7 @@ public class NRODLight
         sdfDateTime = new SimpleDateFormat("dd/MM/yy HH:mm:ss");
     }
     
-    public static void main(String[] args) throws IOException, GeneralSecurityException
+    public static void main(String[] args)
     {
         try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()); }
         catch (ClassNotFoundException | InstantiationException | IllegalAccessException | UnsupportedLookAndFeelException e) { printThrowable(e, "Look & Feel"); }
@@ -91,6 +71,7 @@ public class NRODLight
         }
         catch (FileNotFoundException e) { printErr("Could not create log file"); printThrowable(e, "Startup"); }
         
+        RateMonitor.getInstance(); // Initialises RateMonitor
         printOut("[Main] Starting... (v" + VERSION + ")");
         
         reloadConfig();
@@ -98,29 +79,25 @@ public class NRODLight
         try
         {
             File TDDataDir = new File(NRODLight.EASM_STORAGE_DIR, "TDData");
-            for (File perAreaDir : TDDataDir.listFiles())
+            Arrays.stream(TDDataDir.listFiles()).forEach(f ->
             {
-                String area = perAreaDir.getName();
-                if (area.length() != 2 || !perAreaDir.isDirectory())
-                    continue;
-
-                for (File TDData : perAreaDir.listFiles())
+                if (f.isFile() && f.getName().endsWith(".td"))
                 {
-                    String dataID = TDData.getName().replace("-", ":");
-
-                    if (TDData.isDirectory() || !dataID.endsWith(".td") || dataID.length() != 7)
-                        continue;
-                    
-                    String data = "";
-                    try (BufferedReader br = new BufferedReader(new FileReader(TDData)))
+                    String dataStr = "";
+                    try(BufferedReader br = new BufferedReader(new FileReader(f)))
                     {
-                        data = br.readLine();
+                        dataStr = br.readLine();
                     }
-                    catch (IOException ex) { NRODLight.printThrowable(ex, "TD-Startup"); }
-
-                    TDHandler.DATA_MAP.put(area + dataID.substring(0, 4), data == null ? "" : data);
+                    catch (IOException ex) { printThrowable(ex, "TD-Startup"); }
+                    
+                    try
+                    {
+                        JSONObject data = new JSONObject(dataStr);
+                        data.keys().forEachRemaining(k -> TDHandler.DATA_MAP.putIfAbsent(k, data.getString(k)));
+                    }
+                    catch (JSONException e) { NRODLight.printErr("[TD-Startup] Malformed JSON in " + f.getName()); }
                 }
-            }
+            });
         }
         catch (Exception e) { NRODLight.printThrowable(e, "TD-Startup"); }
         
@@ -161,17 +138,18 @@ public class NRODLight
                     String messageStr = message.toString();
 
                     ensureServerOpen();
-                    webSocket.connections().stream()
-                        .filter(c -> c != null)
-                        .filter(c -> c.isOpen())
-                        .forEach(c -> c.send(messageStr));
-                    EASMWebSocket.printWebSocket("Updated all clients", false);
+                    if (webSocket != null)
+                    {
+                        webSocket.connections().stream()
+                            .filter(c -> c != null)
+                            .filter(c -> c.isOpen())
+                            .forEach(c -> c.send(messageStr));
+                        EASMWebSocket.printWebSocket("Updated all clients", false);
+                    }
                 }
                 catch (Exception e) { printThrowable(e, "SendAll"); }
             }
         }, 500, 60000);
-        
-        updatePopupMenu();
     }
 
     //<editor-fold defaultstate="collapsed" desc="Print methods">
@@ -265,128 +243,6 @@ public class NRODLight
     }
     //</editor-fold>
 
-    public static synchronized void updatePopupMenu()
-    {
-        if (SystemTray.isSupported())
-        {
-            try
-            {
-                PopupMenu menu             = new PopupMenu();
-                MenuItem itemExit          = new MenuItem("Exit");
-                MenuItem itemOpenLog       = new MenuItem("Open Log File");
-                MenuItem itemOpenLogFolder = new MenuItem("Open Log File Folder");
-                MenuItem itemStatus        = new MenuItem("Status...");
-                MenuItem itemInputData     = new MenuItem("Input Data...");
-                MenuItem itemReconnect     = new MenuItem("Stomp Reconnect");
-
-                itemStatus.addActionListener((ActionEvent e) ->
-                {
-                    NRODLight.updatePopupMenu();
-                    
-                    Collection<WebSocket> connsSSL = Collections.unmodifiableCollection(NRODLight.webSocket.connections());
-                    StringBuilder statusMsg = new StringBuilder();
-                    statusMsg.append("WebSocket:");
-                    statusMsg.append("\n  Connections: ").append(connsSSL.size());
-                    statusMsg.append("\n    Secure: ").append(connsSSL.size());
-                    connsSSL.stream().filter(c -> c != null).forEachOrdered(c -> statusMsg.append("\n      ").append(c.getRemoteSocketAddress().getAddress().getHostAddress()).append(":").append(c.getRemoteSocketAddress().getPort()));
-                    statusMsg.append("\nStomp:");
-                    statusMsg.append("\n  Connection: ").append(StompConnectionHandler.isConnected() ? "Connected" : "Disconnected").append(StompConnectionHandler.isTimedOut() ? " (timed out)" : "");
-                    statusMsg.append("\n  Timeout: ").append((System.currentTimeMillis() - StompConnectionHandler.lastMessageTimeGeneral) / 1000f).append("s");
-                    statusMsg.append("\n  Subscriptions:");
-                    statusMsg.append("\n    TD: ").append(String.format("%s - %.2fs", StompConnectionHandler.isSubscribedTD() ? "Yes" : "No", TDHandler.getInstance().getTimeout() / 1000f));
-                    statusMsg.append("\nLogfile: \"").append(NRODLight.logFile.getName()).append("\"");
-                    statusMsg.append("\nStarted: ").append(NRODLight.sdfDateTime.format(ManagementFactory.getRuntimeMXBean().getStartTime()));
-                    
-                    JOptionPane.showMessageDialog(null, statusMsg.toString(), "NRODLight - Status", JOptionPane.INFORMATION_MESSAGE);
-                });
-                itemInputData.addActionListener(e ->
-                {
-                    String input = JOptionPane.showInputDialog(null, "Please input the data in the format: 'key:value;key:value':", "Input Data", JOptionPane.QUESTION_MESSAGE);
-                    if (input != null)
-                    {
-                        Map<String, String> updateMap = new HashMap();
-                        String[] pairs = input.split(";");
-                        
-                        for (String pair : pairs)
-                            if (pair.length() >= 7)
-                                if (pair.charAt(6) == ':')
-                                    updateMap.put(pair.substring(0, 6), pair.substring(7));
-                            
-                        JSONObject container = new JSONObject();
-                        JSONObject message = new JSONObject();
-                        message.put("type", "SEND_UPDATE");
-                        message.put("timestamp", System.currentTimeMillis());
-                        message.put("message", updateMap);
-                        container.put("Message", message);
-                        TDHandler.DATA_MAP.putAll(updateMap);                        
-                        TDHandler.saveTDData(updateMap);
-
-                        String messageStr = container.toString();
-                        NRODLight.webSocket.connections().stream()
-                                .filter(c -> c != null)
-                                .filter(c -> c.isOpen())
-                                .forEach(c -> c.send(messageStr));
-                    }
-                });
-                itemReconnect.addActionListener((ActionEvent e) ->
-                {
-                    if (JOptionPane.showConfirmDialog(null, "Are you sure you wish to reconnect?", "Confirmation", JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION)
-                    {
-                        StompConnectionHandler.disconnect();
-                        StompConnectionHandler.wrappedConnect();
-                    }
-                });
-                itemOpenLog.addActionListener((ActionEvent evt) ->
-                {
-                    try { Desktop.getDesktop().open(NRODLight.logFile); }
-                    catch (IOException e) {}
-                });
-                itemOpenLogFolder.addActionListener((ActionEvent evt) ->
-                {
-                    try { Runtime.getRuntime().exec("explorer.exe /select," + NRODLight.logFile); }
-                    catch (IOException e) {}
-                });
-                itemExit.addActionListener((ActionEvent e) ->
-                {
-                    if (JOptionPane.showConfirmDialog(null, "Are you sure you wish to exit?", "Confirmation", JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION)
-                    {
-                        NRODLight.printOut("[Main] Stopping");
-                        System.exit(0);
-                    }
-                });
-
-                menu.add(itemStatus);
-                menu.add(itemInputData);
-                menu.add(itemReconnect);
-                menu.addSeparator();
-                menu.add(itemOpenLog);
-                menu.add(itemOpenLogFolder);
-                menu.addSeparator();
-                menu.add(itemExit);
-
-                if (sysTrayIcon == null)
-                {
-                    sysTrayIcon = new TrayIcon(Toolkit.getDefaultToolkit().getImage(NRODLight.class.getResource("/nrodlight/resources/TrayIcon.png")), "NROD Light", menu);
-                    sysTrayIcon.setImageAutoSize(true);
-                    sysTrayIcon.addMouseListener(new MouseAdapter()
-                    {
-                        @Override
-                        public void mouseClicked(MouseEvent e)
-                        {
-                            updatePopupMenu();
-                        }
-                    });
-                }
-
-                sysTrayIcon.setPopupMenu(menu);
-
-                if (!Arrays.asList(SystemTray.getSystemTray().getTrayIcons()).contains(sysTrayIcon))
-                    SystemTray.getSystemTray().add(sysTrayIcon);
-            }
-            catch (AWTException e) { printThrowable(e, "SystemTrayIcon"); }
-        }
-    }
-    
     private static void ensureServerOpen()
     {
         if (webSocket == null || webSocket.isClosed())

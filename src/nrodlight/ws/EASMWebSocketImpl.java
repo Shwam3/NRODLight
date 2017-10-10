@@ -16,6 +16,7 @@ import org.json.JSONObject;
 public class EASMWebSocketImpl extends WebSocketImpl
 {
     private List areas = Collections.emptyList();
+    private String IP = null;
     
     public EASMWebSocketImpl(WebSocketListener listener, Draft draft)
     {
@@ -27,20 +28,25 @@ public class EASMWebSocketImpl extends WebSocketImpl
         super(listener, drafts);
     }
 
+    public void setIP(String IP)
+    {
+        if (this.IP == null)
+            this.IP = IP;
+    }
+
+    public String getIP()
+    {
+        return IP;
+    }
+    
     public void send(Map<String, String> messages) throws WebsocketNotConnectedException
     {
-        if (areas.isEmpty())
-        {
-            //EASMWebSocket.printWebSocket(String.format("Sending all %s to %s", messages.get(""), toString()), false);
-            send(messages.get(""));
-        }
-        else
+        if (!areas.isEmpty())
         {
             for (Map.Entry<String, String> e : messages.entrySet())
             {
                 if ("XX".equals(e.getKey()) || areas.contains(e.getKey()))
                 {
-                    //EASMWebSocket.printWebSocket(String.format("Sending \"%s\" %s to %s", e.getKey(), e.getValue(), toString()), false);
                     send(e.getValue());
                 }
             }
@@ -49,14 +55,17 @@ public class EASMWebSocketImpl extends WebSocketImpl
     
     public void sendAll() throws WebsocketNotConnectedException
     {
-        JSONObject message = new JSONObject();
-        JSONObject content = new JSONObject();
-        content.put("type", "SEND_ALL");
-        content.put("timestamp", System.currentTimeMillis());
-        content.put("message", TDHandler.DATA_MAP);
-        message.put("Message", content);
+        if (!areas.isEmpty())
+        {
+            JSONObject message = new JSONObject();
+            JSONObject content = new JSONObject();
+            content.put("type", "SEND_ALL");
+            content.put("timestamp", System.currentTimeMillis());
+            content.put("message", TDHandler.DATA_MAP);
+            message.put("Message", content);
 
-        send(message.toString());
+            send(message.toString());
+        }
     }
 
     public void receive(String message)
@@ -67,20 +76,22 @@ public class EASMWebSocketImpl extends WebSocketImpl
             msg = msg.getJSONObject("Message");
             
             String type = msg.getString("type");
-            if (type.equals("SET_AREAS"))
+            switch(type)
             {
-                JSONArray areasNew = msg.optJSONArray("areas");
-                if (areasNew == null || areasNew.length() == 0)
-                    areas = Collections.emptyList();
-                else
-                {
-                    List<String> l = new ArrayList<>(areasNew.length());
-                    for (Object i : areasNew)
-                        l.add(String.valueOf(i));
-                    areas = l;
-                }
-                
-                sendAll();
+                case "SET_AREAS":
+                    JSONArray areasNew = msg.optJSONArray("areas");
+                    if (areasNew == null || areasNew.length() == 0)
+                        areas = Collections.emptyList();
+                    else
+                    {
+                        List<String> l = new ArrayList<>(areasNew.length());
+                        for (Object i : areasNew)
+                            l.add(String.valueOf(i));
+                        areas = l;
+                    }
+
+                    sendAll();
+                    break;
             }
         }
         catch(JSONException e)

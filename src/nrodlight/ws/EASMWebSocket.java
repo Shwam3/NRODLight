@@ -18,12 +18,17 @@ import java.security.cert.X509Certificate;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.List;
 import java.util.stream.Collectors;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
 import javax.xml.bind.DatatypeConverter;
 import nrodlight.NRODLight;
+import nrodlight.RateMonitor;
 import nrodlight.stomp.handlers.TDHandler;
 import org.java_websocket.WebSocket;
 import org.java_websocket.framing.CloseFrame;
@@ -41,7 +46,24 @@ public class EASMWebSocket extends WebSocketServer
         {
             SSLContext sslContext = getSSLContextFromLetsEncrypt();
             if (sslContext != null)
-                setWebSocketFactory(new EASMWebSocketFactory(sslContext));
+            {
+                SSLEngine engine = sslContext.createSSLEngine();
+                List<String> ciphers = new ArrayList<String>(Arrays.asList(engine.getEnabledCipherSuites()));
+                ciphers.remove("SSL_RSA_WITH_3DES_EDE_CBC_SHA");
+                ciphers.remove("TLS_RSA_WITH_3DES_EDE_CBC_SHA");
+                ciphers.remove("SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA");
+                ciphers.remove("TLS_DHE_RSA_WITH_3DES_EDE_CBC_SHA");
+                ciphers.remove("TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA");
+                ciphers.remove("TLS_DHE_RSA_WITH_AES_128_CBC_SHA");
+                ciphers.remove("TLS_DHE_RSA_WITH_AES_128_CBC_SHA256");
+                ciphers.remove("TLS_DHE_RSA_WITH_AES_128_GCM_SHA256");
+                ciphers.remove("TLS_DHE_RSA_WITH_AES_256_CBC_SHA");
+                ciphers.remove("TLS_DHE_RSA_WITH_AES_256_CBC_SHA256");
+                ciphers.remove("TLS_DHE_RSA_WITH_AES_256_GCM_SHA384");
+                ciphers.remove("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256");
+                
+                setWebSocketFactory(new EASMWebSocketFactory(sslContext, engine.getEnabledProtocols(), ciphers.toArray(new String[ciphers.size()])));
+            }
             else
                 printWebSocket("Unable to create SSL Context", true);
         }
@@ -63,12 +85,12 @@ public class EASMWebSocket extends WebSocketServer
             
             KeyFactory keyFactory = KeyFactory.getInstance("RSA");
             RSAPrivateKey key = (RSAPrivateKey) keyFactory.generatePrivate(new PKCS8EncodedKeySpec(keyBytes));
-
+            
             KeyStore keystore = KeyStore.getInstance("JKS");
             keystore.load(null);
             keystore.setCertificateEntry("cert-alias", cert);
             keystore.setKeyEntry("key-alias", key, new char[0], new Certificate[]{cert});
-
+            
             KeyManagerFactory kmf = KeyManagerFactory.getInstance("SunX509");
             kmf.init(keystore, new char[0]);
 
@@ -93,30 +115,39 @@ public class EASMWebSocket extends WebSocketServer
     @Override
     public void onOpen(WebSocket conn, ClientHandshake handshake)
     {
-        printWebSocket(String.format("Open connection to %s:%s from %s%s",
-                conn.getRemoteSocketAddress().getAddress().getHostAddress(),
-                conn.getRemoteSocketAddress().getPort(),
-                handshake.hasFieldValue("Origin") ? handshake.getFieldValue("Origin") : "Unknown",
-                handshake.hasFieldValue("User-Agent") ? " (" + handshake.getFieldValue("User-Agent") + ")" : ""
-            ), false);
+        if (conn instanceof EASMWebSocketImpl)
+        {
+            EASMWebSocketImpl easmconn = (EASMWebSocketImpl)conn;
+            easmconn.setIP(handshake.hasFieldValue("X-Forwarded-For") ? handshake.getFieldValue("X-Forwarded-For") :
+                (handshake.hasFieldValue("CF-Connecting-IP") ? handshake.getFieldValue("CF-Connecting-IP") :
+                    (conn.getRemoteSocketAddress().getAddress().getHostAddress())));
 
-        JSONObject message = new JSONObject();
-        JSONObject content = new JSONObject();
-        content.put("type", "SEND_ALL");
-        content.put("timestamp", System.currentTimeMillis());
-        content.put("message", TDHandler.DATA_MAP);
-        message.put("Message", content);
-        String messageStr = message.toString();
+            printWebSocket(String.format("Open connection to %s from %s%s",
+                    easmconn.getIP(),
+                    handshake.hasFieldValue("Origin") ? handshake.getFieldValue("Origin") : "Unknown",
+                    handshake.hasFieldValue("User-Agent") ? " (" + handshake.getFieldValue("User-Agent") + ")" : ""
+                ), false);
 
-        conn.send(messageStr);
+            JSONObject message = new JSONObject();
+            JSONObject content = new JSONObject();
+            content.put("type", "SEND_ALL");
+            content.put("timestamp", System.currentTimeMillis());
+            content.put("message", TDHandler.DATA_MAP);
+            message.put("Message", content);
+            String messageStr = message.toString();
+
+            easmconn.send(messageStr);
+            RateMonitor.getInstance().onWSOpen();
+        }
     }
 
     @Override
     public void onClose(WebSocket conn, int code, String reason, boolean remote)
     {
         printWebSocket(
-            String.format("Close connection to %s (%s%s)",
-                conn.getRemoteSocketAddress().getAddress().getHostAddress(),
+            String.format("Close connection %s %s (%s%s)",
+                remote ? "from" : "to",
+                conn instanceof EASMWebSocketImpl ? ((EASMWebSocketImpl)conn).getIP() : conn.getRemoteSocketAddress().getAddress().getHostAddress(),
                 code,
                 reason != null && !reason.isEmpty() ? "/" + reason : ""
             ),
@@ -135,12 +166,22 @@ public class EASMWebSocket extends WebSocketServer
     @Override
     public void onError(WebSocket conn, Exception ex)
     {
+        String ip = null;
+        try { ip = conn instanceof EASMWebSocketImpl ? ((EASMWebSocketImpl)conn).getIP() : conn.getRemoteSocketAddress().getAddress().getHostAddress(); }
+        catch (Exception e) {}
+        
         if (conn != null)
         {
-            printWebSocket("Error (" + conn.getRemoteSocketAddress().getAddress().getHostAddress() + "):", true);
-            conn.close(CloseFrame.ABNORMAL_CLOSE, ex.getMessage());
+            printWebSocket("Error (" + (ip != null ? ip : "Unknown") + "):", true);
+            conn.close(CloseFrame.NORMAL, ex.getMessage());
         }
-        NRODLight.printThrowable(ex, "WebSocket" + (conn != null ? "-" + conn.getRemoteSocketAddress().getAddress().getHostAddress() : ""));
+        NRODLight.printThrowable(ex, "WebSocket" + (conn != null ? "-" + (ip != null ? ip : "Unknown") : ""));
+    }
+
+    @Override
+    public void onStart()
+    {
+        printWebSocket("Started", false);
     }
 
     @Override
