@@ -112,7 +112,7 @@ public class NRODLight
             }
             
             StompConnectionHandler.disconnect();
-        }));
+        }, "NRODShutdown"));
         
         ensureServerOpen();
         

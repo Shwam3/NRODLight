@@ -6,9 +6,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import nrodlight.NRODLight;
 import nrodlight.RateMonitor;
@@ -157,7 +155,7 @@ public class TDHandler implements NRODListener
                                                 zfill(Integer.toHexString(start+i), 2),
                                                 8 - j
                                             ).toUpperCase();
-                                String dat = String.valueOf(binary.charAt(8*i+j));
+                                String dat = String.valueOf(binary.charAt(8 * i + j));
                                 updateMap.put(id, dat);
                                 if (!DATA_MAP.containsKey(id) || DATA_MAP.get(id) == null || dat.equals(DATA_MAP.get(id)))
                                 {
@@ -231,10 +229,7 @@ public class TDHandler implements NRODListener
         File TDDataDir = new File(NRODLight.EASM_STORAGE_DIR, "TDData");
         if (!mapToSave.isEmpty())
         {
-            Set<String> cClAreas = new HashSet<>();
             JSONObject cClObj = new JSONObject();
-            
-            Set<String> sClAreas = new HashSet<>();
             JSONObject sClObj = new JSONObject();
             
             mapToSave.keySet().forEach(key ->
@@ -242,13 +237,13 @@ public class TDHandler implements NRODListener
                 String area = key.substring(0, 2);
                 if (key.charAt(4) == ':')
                 {
-                    sClAreas.add(area);
-                    sClObj.put(area, new JSONObject());
+                    if (sClObj.has(area))
+                        sClObj.put(area, new JSONObject());
                 }
                 else
                 {
-                    cClAreas.add(area);
-                    cClObj.put(area, new JSONObject());
+                    if (cClObj.has(area))
+                        cClObj.put(area, new JSONObject());
                 }
             });
             
@@ -257,12 +252,12 @@ public class TDHandler implements NRODListener
                 String area = k.substring(0, 2);
                 if (k.charAt(4) == ':')
                 {
-                    if (sClAreas.contains(area))
+                    if (sClObj.has(area))
                         sClObj.getJSONObject(area).put(k, v);
                 }
                 else
                 {
-                    if (cClAreas.contains(area))
+                    if (cClObj.has(area))
                         cClObj.getJSONObject(area).put(k, v);
                 }
             });
