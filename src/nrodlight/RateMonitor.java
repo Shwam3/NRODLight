@@ -19,12 +19,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class RateMonitor
 {
     private final Map<String, AtomicInteger> rateMap = new HashMap<>();
-    private final List<Float> stompDelays = new ArrayList<>();
+    private final List<Double> stompDelays = new ArrayList<>();
+    private final List<Double> descrDelays = new ArrayList<>();
     private final AtomicInteger wsPeakConns = new AtomicInteger();
     private static PrintWriter logStream;
     private static File        logFile;
     private static String      lastLogDate = "";
-    private final String[]     topics = {"StompMessages", "StompDelay", "TDMessages", "WSConnections"};
+    private final String[]     topics = {"StompMessages", "StompDelay", "TDDelay", "TDMessages", "WSConnections"};
 
     private static RateMonitor instance = null;
     private RateMonitor()
@@ -85,15 +86,22 @@ public class RateMonitor
                     String topic = topics[i];
                     if ("StompDelay".equals(topic))
                     {
-                        List<Float> delays = new ArrayList<>(stompDelays);
+                        List<Double> delays = new ArrayList<>(stompDelays);
                         stompDelays.clear();
-                        double avg = delays.stream().mapToDouble(Float::doubleValue).average().orElse(0);
+                        double avg = delays.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                        logStream.print(String.format("%.3f%s", avg, (i >= topics.length-1 ? "" : ",")));
+                    }
+                    else if ("TDDelay".equals(topic))
+                    {
+                        List<Double> delays = new ArrayList<>(descrDelays);
+                        descrDelays.clear();
+                        double avg = delays.stream().mapToDouble(Double::doubleValue).average().orElse(0);
                         logStream.print(String.format("%.3f%s", avg, (i >= topics.length-1 ? "" : ",")));
                     }
                     else if ("WSConnections".equals(topic))
                     {
-                        int count = NRODLight.webSocket != null ? NRODLight.webSocket.connections().size() : 0;
-                        logStream.print(wsPeakConns.getAndSet(count)+ (i >= topics.length-1 ? "" : ","));
+                        int count = NRODLight.webSocket != null ? NRODLight.webSocket.getConnections().size() : 0;
+                        logStream.print(wsPeakConns.getAndSet(count) + (i >= topics.length-1 ? "" : ","));
                     }
                     else
                     {
@@ -113,12 +121,12 @@ public class RateMonitor
             instance = new RateMonitor();
 
         return instance;
-
     }
     
-    public void onTDMessage(Float delay, int msgCount)
+    public void onTDMessage(Double delayStomp, Double delayTD, int msgCount)
     {
-        stompDelays.add(delay);
+        stompDelays.add(delayStomp);
+        descrDelays.add(delayStomp);
         rateMap.get("StompMessages").incrementAndGet();
         rateMap.get("TDMessages").addAndGet(msgCount);
     }

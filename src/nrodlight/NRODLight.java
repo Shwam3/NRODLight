@@ -140,7 +140,7 @@ public class NRODLight
                     ensureServerOpen();
                     if (webSocket != null)
                     {
-                        webSocket.connections().stream()
+                        webSocket.getConnections().stream()
                             .filter(c -> c != null)
                             .filter(c -> c.isOpen())
                             .forEach(c -> c.send(messageStr));
@@ -251,6 +251,7 @@ public class NRODLight
                 EASMWebSocket ews = new EASMWebSocket(port, true);
                 try
                 {
+                    if (webSocket != null) webSocket.stop();
                     webSocket = ews;
                     webSocket.run();
                 }

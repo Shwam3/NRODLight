@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
@@ -38,17 +39,20 @@ import org.json.JSONObject;
 
 public class EASMWebSocket extends WebSocketServer
 {
+    private static final AtomicBoolean serverClosed = new AtomicBoolean(false);
+
     public EASMWebSocket(int port, boolean useSSL)
     {
         super(new InetSocketAddress(port));
-        
+        super.setReuseAddr(true);
+
         if (useSSL)
         {
             SSLContext sslContext = getSSLContextFromLetsEncrypt();
             if (sslContext != null)
             {
                 SSLEngine engine = sslContext.createSSLEngine();
-                List<String> ciphers = new ArrayList<String>(Arrays.asList(engine.getEnabledCipherSuites()));
+                List<String> ciphers = new ArrayList<>(Arrays.asList(engine.getEnabledCipherSuites()));
                 ciphers.remove("SSL_RSA_WITH_3DES_EDE_CBC_SHA");
                 ciphers.remove("TLS_RSA_WITH_3DES_EDE_CBC_SHA");
                 ciphers.remove("SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA");
@@ -187,12 +191,19 @@ public class EASMWebSocket extends WebSocketServer
     @Override
     public Collection<WebSocket> connections()
     {
-        return super.connections().stream().filter(c -> c != null && c.isOpen()).collect(Collectors.toList());
+        return super.getConnections().stream().filter(c -> c != null && c.isOpen()).collect(Collectors.toList());
+    }
+
+    @Override
+    public void stop(int timeout) throws InterruptedException
+    {
+        serverClosed.set(true);
+        super.stop(timeout);
     }
     
     public boolean isClosed()
     {
-        return isclosed.get();
+        return serverClosed.get();
     }
 
     public static void printWebSocket(String message, boolean toErr)
