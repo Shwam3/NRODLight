@@ -57,7 +57,9 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+*.iml
 /dist
 /build
 /nbproject
+/.idea
 src/nrodclient/resources/daphkey.openssh

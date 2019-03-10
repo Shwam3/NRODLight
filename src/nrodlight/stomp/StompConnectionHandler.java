@@ -1,18 +1,20 @@
 package nrodlight.stomp;
 
-import java.io.IOException;
-import java.net.UnknownHostException;
-import java.util.Date;
-import java.util.Map;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import javax.security.auth.login.LoginException;
 import net.ser1.stomp.Listener;
 import net.ser1.stomp.Version;
 import nrodlight.NRODLight;
 import nrodlight.stomp.handlers.ErrorHandler;
 import nrodlight.stomp.handlers.TDHandler;
+import nrodlight.stomp.handlers.TRUSTHandler;
+import nrodlight.stomp.handlers.VSTPHandler;
+
+import javax.security.auth.login.LoginException;
+import java.io.IOException;
+import java.net.UnknownHostException;
+import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class StompConnectionHandler
 {
@@ -25,15 +27,21 @@ public class StompConnectionHandler
     public  static long   lastMessageTimeGeneral = System.currentTimeMillis();
     private static String appID = "";
 
+    private static boolean subscribedTRUST = false;
+    private static boolean subscribedVSTP  = false;
     private static boolean subscribedTD    = false;
 
-    private static final Listener handlerTD = TDHandler.getInstance();
+    private static final Listener handlerTRUST = TRUSTHandler.getInstance();
+    private static final Listener handlerVSTP  = VSTPHandler.getInstance();
+    private static final Listener handlerTD    = TDHandler.getInstance();
 
     public static boolean connect() throws LoginException, IOException
     {
         printStomp(Version.VERSION, false);
 
-        subscribedTD = false;
+        subscribedTRUST = false;
+        subscribedVSTP  = false;
+        subscribedTD    = false;
 
         NRODLight.reloadConfig();
         String username = NRODLight.config.optString("NROD_Username", "");
@@ -41,7 +49,7 @@ public class StompConnectionHandler
 
         appID = username + "-NRODLight-" + NRODLight.config.optString("NROD_Instance_ID", "uid") + "-v" + NRODLight.VERSION;
 
-        if ((username != null && username.equals("")) || (password != null && password.equals("")))
+        if ("".equals(username) || "".equals(password))
         {
             printStomp("Error retreiving login details (usr: " + username + ", pwd: " + password + ")", true);
             return false;
@@ -64,6 +72,8 @@ public class StompConnectionHandler
         }
 
         client.addErrorListener(new ErrorHandler());
+        toggleTRUST();
+        toggleVSTP();
         toggleTD();
 
         try { Thread.sleep(100); }
@@ -77,8 +87,10 @@ public class StompConnectionHandler
         if (client != null && isConnected() && !isClosed())
             client.disconnect();
 
-        subscribedTD = false;
-        
+        subscribedTRUST = false;
+        subscribedVSTP  = false;
+        subscribedTD    = false;
+
         printStomp("Disconnected", false);
     }
 
@@ -107,7 +119,14 @@ public class StompConnectionHandler
 
     private static long getTimeoutThreshold()
     {
-        return 30000;
+        long threshold;
+
+        if (subscribedTRUST || subscribedTD)
+            threshold = 30000;
+        else
+            threshold = 30000;
+
+        return threshold;
     }
 
     public static boolean wrappedConnect()
@@ -168,19 +187,37 @@ public class StompConnectionHandler
                 {
                     timeoutWait = 10;
 
-                    long timeTD = TDHandler.getInstance().getTimeout();
-                    boolean timedOutTD = timeTD >= TDHandler.getInstance().getTimeoutThreshold();
+                    long timeTRUST = TRUSTHandler.getInstance().getTimeout();
+                    long timeVSTP  = VSTPHandler.getInstance().getTimeout();
+                    long timeTD    = TDHandler.getInstance().getTimeout();
+                    boolean timedOutTRUST = timeTRUST >= TRUSTHandler.getInstance().getTimeoutThreshold();
+                    boolean timedOutVSTP  = timeVSTP  >= VSTPHandler.getInstance().getTimeoutThreshold();
+                    boolean timedOutTD    = timeTD    >= TDHandler.getInstance().getTimeoutThreshold();
 
-                    printStomp(String.format("  TD Timeout: %02d:%02d:%02d (Threshold: %ss)",
+                    printStomp(String.format("  TRUST Timeout: %02d:%02d:%02d (Threshold: %ss)",
+                                (timeTRUST / (1000 * 60 * 60)) % 24,
+                                (timeTRUST / (1000 * 60)) % 60,
+                                (timeTRUST / 1000) % 60,
+                                (TRUSTHandler.getInstance().getTimeoutThreshold() / 1000)),
+                            timedOutTRUST);
+                    printStomp(String.format("  VSTP Timeout:  %02d:%02d:%02d (Threshold: %ss)",
+                                (timeVSTP / (1000 * 60 * 60)) % 24,
+                                (timeVSTP / (1000 * 60)) % 60,
+                                (timeVSTP / 1000) % 60,
+                                (VSTPHandler.getInstance().getTimeoutThreshold() / 1000)),
+                            timedOutVSTP);
+                    printStomp(String.format("  TD Timeout:    %02d:%02d:%02d (Threshold: %ss)",
                                 (timeTD / (1000 * 60 * 60)) % 24,
                                 (timeTD / (1000 * 60)) % 60,
                                 (timeTD / 1000) % 60,
                                 (TDHandler.getInstance().getTimeoutThreshold() / 1000)),
                             timedOutTD);
 
-                    if (timedOutTD)
+                    if (timedOutTRUST || timedOutVSTP || timedOutTD)
                     {
-                        if (timeTD >= TDHandler.getInstance().getTimeoutThreshold()*1.5)
+                        if (timeTRUST >= TRUSTHandler.getInstance().getTimeoutThreshold()*1.5 ||
+                            timeVSTP  >= VSTPHandler.getInstance().getTimeoutThreshold()*1.5 ||
+                            timeTD    >= TDHandler.getInstance().getTimeoutThreshold()*1.5)
                         {
                             if (client != null)
                                 disconnect();
@@ -189,6 +226,37 @@ public class StompConnectionHandler
                         }
                     }
                     else
+                    {
+                        if (timedOutTRUST)
+                        {
+                            toggleTRUST();
+
+                            try { Thread.sleep(50); }
+                            catch(InterruptedException e) {}
+
+                            toggleTRUST();
+                        }
+                        if (timedOutVSTP)
+                        {
+                            toggleVSTP();
+
+                            try { Thread.sleep(50); }
+                            catch(InterruptedException e) {}
+
+                            toggleVSTP();
+                        }
+                        if (timedOutTD)
+                        {
+                            toggleTD();
+
+                            try { Thread.sleep(50); }
+                            catch(InterruptedException e) {}
+
+                            toggleTD();
+                        }
+                    }
+
+                    if (!timedOutTRUST && !timedOutTD)
                         printStomp("No problems", false);
                 }
             }
@@ -218,36 +286,62 @@ public class StompConnectionHandler
             client.ack(ackId);
     }
 
+    public static void toggleTRUST()
+    {
+        if (subscribedTRUST)
+        {
+            client.unsubscribe("TRUST");
+            printStomp("Unsubscribed from \"/topic/TRAIN_MVT_ALL_TOC\" (ID: \"" + appID + "-TRUST\")", false);
+            subscribedTRUST = false;
+        }
+        else
+        {
+            client.subscribe("/topic/TRAIN_MVT_ALL_TOC", "TRUST", handlerTRUST);
+            subscribedTRUST = true;
+        }
+    }
+    public static void toggleVSTP()
+    {
+        if (subscribedVSTP)
+        {
+            client.unsubscribe("VSTP");
+            printStomp("Unsubscribed from \"/topic/VSTP_ALL\" (ID: \"" + appID + "-VSTP\")", false);
+            subscribedVSTP = false;
+        }
+        else
+        {
+            client.subscribe("/topic/VSTP_ALL", "VSTP", handlerVSTP);
+            subscribedVSTP = true;
+        }
+    }
     public static void toggleTD()
     {
         if (subscribedTD)
         {
             client.unsubscribe("TD");
-            StompConnectionHandler.printStomp("Unsubscribed from \"/topic/TD_ALL_SIG_AREA\" (ID: \"" + appID + "-TD\")", false);
+            printStomp("Unsubscribed from \"/topic/TD_ALL_SIG_AREA\" (ID: \"" + appID + "-TD\")", false);
             subscribedTD = false;
         }
         else
         {
             client.subscribe("/topic/TD_ALL_SIG_AREA", "TD", handlerTD);
-            //client.addListener("/topic/TD_ALL_SIG_AREA", rateMonitor);
             subscribedTD = true;
         }
     }
 
+    public static boolean isSubscribedTRUST() { return subscribedTRUST; }
+    public static boolean isSubscribedVSTP() { return subscribedVSTP; }
     public static boolean isSubscribedTD() { return subscribedTD; }
 
     public static void printStompHeaders(Map<String, String> headers)
     {
-        printStomp(String.format("Message received (topic: %s, time: %s, delay: %s, expires: %s, id: %s, ack: %s, subscription: %s, persistent: %s%s)",
+        printStomp(
+            String.format("Message received (%s, id: %s, ack: %s, subscription: %s%s)",
                 String.valueOf(headers.get("destination")).replace("\\c", ":"),
-                NRODLight.sdfTime.format(new Date(Long.parseLong(headers.get("timestamp")))),
-                (System.currentTimeMillis() - Long.parseLong(headers.get("timestamp")))/1000f + "s",
-                NRODLight.sdfTime.format(new Date(Long.parseLong(headers.get("expires")))),
                 String.valueOf(headers.get("message-id")).replace("\\c", ":"),
                 String.valueOf(headers.get("ack")).replace("\\c", ":"),
                 String.valueOf(headers.get("subscription")).replace("\\c", ":"),
-                String.valueOf(headers.get("persistent")).replace("\\c", ":"),
-                headers.size() > 7 ? ", + " + (headers.size()-7) + " more" : ""
+                headers.size() > 7 ? ", + " + (headers.size()-4) + " more" : ""
             ), false);
     }
 }

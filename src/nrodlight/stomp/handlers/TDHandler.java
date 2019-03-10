@@ -252,12 +252,12 @@ public class TDHandler implements NRODListener
                 String area = key.substring(0, 2);
                 if (key.charAt(4) == ':')
                 {
-                    if (sClObj.has(area))
+                    if (!sClObj.has(area))
                         sClObj.put(area, new JSONObject());
                 }
                 else
                 {
-                    if (cClObj.has(area))
+                    if (!cClObj.has(area))
                         cClObj.put(area, new JSONObject());
                 }
             });

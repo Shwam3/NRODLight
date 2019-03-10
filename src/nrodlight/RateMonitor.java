@@ -12,7 +12,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -25,7 +24,7 @@ public class RateMonitor
     private static PrintWriter logStream;
     private static File        logFile;
     private static String      lastLogDate = "";
-    private final String[]     topics = {"StompMessages", "StompDelay", "TDDelay", "TDMessages", "WSConnections"};
+    private final String[]     topics = {"StompMessages", "StompDelay", "TDDelay", "TDMessages", "WSConnections", "TRUSTMessages", "VSTPMessages"};
 
     private static RateMonitor instance = null;
     private RateMonitor()
@@ -57,7 +56,7 @@ public class RateMonitor
         wait.set(Calendar.SECOND, 0);
         wait.add(Calendar.MINUTE, 1);
 
-        ScheduledFuture<?> sf = Executors.newScheduledThreadPool(1).scheduleAtFixedRate(() ->
+        Executors.newScheduledThreadPool(1).scheduleAtFixedRate(() ->
         {
             try
             {
@@ -89,25 +88,28 @@ public class RateMonitor
                         List<Double> delays = new ArrayList<>(stompDelays);
                         stompDelays.clear();
                         double avg = delays.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-                        logStream.print(String.format("%.3f%s", avg, (i >= topics.length-1 ? "" : ",")));
+                        logStream.print(String.format("%.3f", avg));
                     }
                     else if ("TDDelay".equals(topic))
                     {
                         List<Double> delays = new ArrayList<>(descrDelays);
                         descrDelays.clear();
                         double avg = delays.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-                        logStream.print(String.format("%.3f%s", avg, (i >= topics.length-1 ? "" : ",")));
+                        logStream.print(String.format("%.3f", avg));
                     }
                     else if ("WSConnections".equals(topic))
                     {
                         int count = NRODLight.webSocket != null ? NRODLight.webSocket.getConnections().size() : 0;
-                        logStream.print(wsPeakConns.getAndSet(count) + (i >= topics.length-1 ? "" : ","));
+                        logStream.print(wsPeakConns.getAndSet(count));
                     }
                     else
                     {
                         long count = rateMap.get(topic).getAndSet(0);
-                        logStream.print(count + (i >= topics.length-1 ? "" : ","));
+                        logStream.print(count);
                     }
+
+                    if (i < topics.length-1)
+                        logStream.print(',');
                 }
                 logStream.println();
             }
@@ -122,11 +124,11 @@ public class RateMonitor
 
         return instance;
     }
-    
+
     public void onTDMessage(Double delayStomp, Double delayTD, int msgCount)
     {
         stompDelays.add(delayStomp);
-        descrDelays.add(delayStomp);
+        descrDelays.add(delayTD);
         rateMap.get("StompMessages").incrementAndGet();
         rateMap.get("TDMessages").addAndGet(msgCount);
     }
@@ -134,5 +136,15 @@ public class RateMonitor
     public void onWSOpen()
     {
         wsPeakConns.incrementAndGet();
+    }
+
+    public void onVSTPMessage()
+    {
+        rateMap.get("VSTPMessages").incrementAndGet();
+    }
+
+    public void onTRUSTMessage(int msgCount)
+    {
+        rateMap.get("TRUSTMessages").addAndGet(msgCount);
     }
 }
