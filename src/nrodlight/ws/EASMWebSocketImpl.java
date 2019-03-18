@@ -1,10 +1,5 @@
 package nrodlight.ws;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import nrodlight.stomp.handlers.TDHandler;
 import org.java_websocket.WebSocketImpl;
 import org.java_websocket.WebSocketListener;
@@ -13,6 +8,12 @@ import org.java_websocket.exceptions.WebsocketNotConnectedException;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 public class EASMWebSocketImpl extends WebSocketImpl
 {
@@ -63,18 +64,6 @@ public class EASMWebSocketImpl extends WebSocketImpl
                     send(e.getValue());
                 }
             }
-
-            if (delayColouration)
-            {
-                JSONObject message = new JSONObject();
-                JSONObject content = new JSONObject();
-                content.put("type", "SEND_UPDATE");
-                content.put("timestamp", System.currentTimeMillis());
-                content.put("delay_colours", new JSONArray());
-                message.put("Message", content);
-
-                send(message.toString());
-            }
         }
     }
 
@@ -101,8 +90,6 @@ public class EASMWebSocketImpl extends WebSocketImpl
             if (!splitFullMessages)
             {
                 content.put("message", TDHandler.DATA_MAP);
-                if (this.delayColouration)
-                    content.put("delay_colours", new JSONArray());
 
                 send(message.toString());
             }
@@ -172,11 +159,12 @@ public class EASMWebSocketImpl extends WebSocketImpl
                         }
                     }
 
-                    // Disabled for now
-                    this.delayColouration = false; //delayColourationNew;
+                    this.delayColouration = delayColourationNew;
                     this.splitFullMessages = splitFullMessagesNew;
 
                     sendAll();
+                    if (EASMWebSocket.getDelayData() != null && delayColourationNew)
+                        send(EASMWebSocket.getDelayData().replace("\"%time%\"", Long.toString(System.currentTimeMillis())));
                     break;
             }
         }

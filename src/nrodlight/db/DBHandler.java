@@ -33,5 +33,6 @@ public class DBHandler
         {
             NRODLight.printThrowable(ex, "DBHandler");
         }
+        conn = null;
     }
 }

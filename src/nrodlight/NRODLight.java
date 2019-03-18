@@ -1,5 +1,17 @@
 package nrodlight;
 
+import nrodlight.db.DBHandler;
+import nrodlight.stomp.StompConnectionHandler;
+import nrodlight.stomp.handlers.TDHandler;
+import nrodlight.ws.EASMWebSocket;
+import nrodlight.ws.EASMWebSocketImpl;
+import org.java_websocket.WebSocket;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import javax.swing.UIManager;
+import javax.swing.UnsupportedLookAndFeelException;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
@@ -12,26 +24,22 @@ import java.nio.file.StandardWatchEventKinds;
 import java.nio.file.WatchEvent;
 import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TimeZone;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.atomic.AtomicBoolean;
-import javax.swing.*;
-import nrodlight.db.DBHandler;
-import nrodlight.stomp.StompConnectionHandler;
-import nrodlight.stomp.handlers.TDHandler;
-import nrodlight.ws.EASMWebSocket;
-import nrodlight.ws.EASMWebSocketImpl;
-import org.java_websocket.WebSocket;
-import org.json.JSONException;
-import org.json.JSONObject;
 
 public class NRODLight
 {
@@ -110,6 +118,55 @@ public class NRODLight
             printOut("[Startup] Finished reading TD data");
         }
         catch (Exception e) { NRODLight.printThrowable(e, "TD-Startup"); }
+
+        try
+        {
+            Connection conn = DBHandler.getConnection();
+            PreparedStatement ps = conn.prepareStatement("SELECT train_id,train_id_current,a.schedule_uid,start_timestamp,"
+                + "current_delay,next_expected_update,off_route,tds FROM activations a INNER JOIN schedules s ON a.schedule_uid = s.schedule_uid AND "
+                + "a.stp_indicator = s.stp_indicator AND a.schedule_date_from = s.date_from WHERE last_update > ? AND "
+                + "(finished = 0 OR last_update > ?) AND cancelled = 0 AND tds != ''");
+            ps.setLong(1, System.currentTimeMillis() - 43200000L); // 12 hours
+            ps.setLong(2, System.currentTimeMillis() - 1800000L); // 30 mins
+            ResultSet r = ps.executeQuery();
+
+            String[] columns = {"train_id","train_id_current","schedule_uid","start_timestamp","current_delay","next_expected_update","off_route","tds"};
+            List<JSONObject> resultData = new ArrayList<>();
+            while (r.next())
+            {
+                JSONObject jobj = new JSONObject();
+
+                for (int i = 0; i < columns.length; i++)
+                    jobj.put(columns[i], r.getObject(i+1));
+
+                resultData.add(jobj);
+            }
+            r.close();
+            ps.close();
+
+            JSONObject delayData = new JSONObject();
+            for (JSONObject obj : resultData)
+            {
+                for (String td : obj.getString("tds").split(","))
+                {
+                    obj.remove("tds");
+                    if (!delayData.has(td))
+                        delayData.put(td, new JSONArray());
+                    delayData.getJSONArray(td).put(obj);
+                }
+            }
+            JSONObject message = new JSONObject();
+            JSONObject content = new JSONObject();
+            content.put("type", "DELAYS");
+            content.put("timestamp", "%time%");
+            content.put("message", delayData);
+            message.put("Message", content);
+
+            EASMWebSocket.setDelayData(message.toString());
+            printOut("[Startup] Got delay data");
+        }
+        catch (SQLException sqlex) { printThrowable(sqlex, "Startup-Delays"); }
+        catch (Exception e) { printThrowable(e, "Startup-Delays"); }
 
         Runtime.getRuntime().addShutdownHook(new Thread(() ->
         {
@@ -216,6 +273,65 @@ public class NRODLight
                             });
                         EASMWebSocket.printWebSocket("Updated all clients", false);
                     }
+
+                    try
+                    {
+                        Connection conn = DBHandler.getConnection();
+                        PreparedStatement ps = conn.prepareStatement("SELECT train_id,train_id_current,a.schedule_uid,start_timestamp,current_delay,"
+                            + "next_expected_update,off_route,tds FROM activations a INNER JOIN schedules s ON a.schedule_uid = s.schedule_uid AND "
+                            + "a.stp_indicator = s.stp_indicator AND a.schedule_date_from = s.date_from WHERE last_update > ? AND "
+                            + "(finished = 0 OR last_update > ?) AND cancelled = 0 AND tds != ''");
+                        ps.setLong(1, System.currentTimeMillis() - 43200000L); // 12 hours
+                        ps.setLong(2, System.currentTimeMillis() - 1800000L); // 30 mins
+                        ResultSet r = ps.executeQuery();
+
+                        String[] columns = {"train_id","train_id_current","schedule_uid","start_timestamp","current_delay","next_expected_update","off_route","tds"};
+                        List<JSONObject> resultData = new ArrayList<>();
+                        while (r.next())
+                        {
+                            JSONObject jobj = new JSONObject();
+
+                            for (int i = 0; i < columns.length; i++)
+                                jobj.put(columns[i], r.getObject(i+1));
+
+                            resultData.add(jobj);
+                        }
+                        r.close();
+                        ps.close();
+
+                        JSONObject delayData = new JSONObject();
+                        for (JSONObject obj : resultData)
+                        {
+                            for (String td : obj.getString("tds").split(","))
+                            {
+                                obj.remove("tds");
+                                if (!delayData.has(td))
+                                    delayData.put(td, new JSONArray());
+                                delayData.getJSONArray(td).put(obj);
+                            }
+                        }
+                        content.put("type", "DELAYS");
+                        content.put("timestamp", "%time%");
+                        content.put("message", delayData);
+                        message.put("Message", content);
+
+                        EASMWebSocket.setDelayData(message.toString());
+
+                        if (webSocket != null)
+                        {
+                            content.put("timestamp", System.currentTimeMillis());
+                            final String delayDataStr = message.toString();
+                            webSocket.getConnections().stream()
+                                    .filter(Objects::nonNull)
+                                    .filter(WebSocket::isOpen)
+                                    .filter(c -> c instanceof EASMWebSocketImpl)
+                                    .map(EASMWebSocketImpl.class::cast)
+                                    .filter(EASMWebSocketImpl::optDelayColouration)
+                                    .forEach(c -> c.send(delayDataStr));
+                        }
+
+                    }
+                    catch (SQLException sqlex) { printThrowable(sqlex, "SendAll-SQL"); }
                 }
                 catch (Exception e) { printThrowable(e, "SendAll"); }
             }
@@ -351,7 +467,7 @@ public class NRODLight
     {
         try
         {
-            String configContents = new String(Files.readAllBytes(new File(EASM_STORAGE_DIR,"config.json").toPath()));
+            String configContents = new String(Files.readAllBytes(new File(EASM_STORAGE_DIR, "config.json").toPath()));
 
             JSONObject newConfig = new JSONObject(configContents);
 

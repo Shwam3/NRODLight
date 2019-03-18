@@ -8,7 +8,11 @@ import nrodlight.stomp.StompConnectionHandler;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.*;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -57,24 +61,14 @@ public class VSTPHandler implements NRODListener
         try
         {
             Connection conn = DBHandler.getConnection();
-            //NRODLight.printOut("[VSTP] Got DB connection");
 
             JSONObject schedule = msg.getJSONObject("schedule");
             if (schedule.has("CIF_train_uid")) {
                 schedule.put("CIF_train_uid", schedule.getString("CIF_train_uid").replace(" ", "O"));
             }
-            //NRODLight.printOut(String.format("[VSTP] Looking for: %sed schedule: %s, %s, %s%s",
-            //        schedule.getString("transaction_type"),
-            //        schedule.getString("CIF_train_uid"),
-            //        vstpToCifDate(schedule.getString("schedule_start_date")),
-            //        schedule.getString("CIF_stp_indicator"),
-            //        ("Deleted".equals(schedule.getString("transaction_type")) ? "" :
-            //                ", with " + schedule.getJSONArray("schedule_segment").getJSONObject(0).getJSONArray("schedule_location").length() + " locations")
-            //));
 
             if ("Delete".equals(schedule.getString("transaction_type")) || "Update".equals(schedule.getString("transaction_type")))
             {
-                //NRODLight.printOut("[VSTP] In delete/update");
                 PreparedStatement psBSDel;
                 psBSDel = conn.prepareStatement("DELETE FROM schedule_locations WHERE schedule_uid = ? AND stp_indicator = ? AND date_from = ? AND schedule_source = 'V'");
                 psBSDel.setString(1, schedule.getString("CIF_train_uid"));
@@ -86,12 +80,10 @@ public class VSTPHandler implements NRODListener
                 psBSDel.setString(2, schedule.getString("CIF_stp_indicator"));
                 psBSDel.setString(3, vstpToCifDate(schedule.getString("schedule_start_date")));
                 psBSDel.executeUpdate();
-                //NRODLight.printOut("[VSTP] Done delete/update");
             }
 
             if ("Create".equals(schedule.getString("transaction_type")) || "Update".equals(schedule.getString("transaction_type")))
             {
-                //NRODLight.printOut("[VSTP] In create/update");
                 JSONObject sched_seg = schedule.getJSONArray("schedule_segment").getJSONObject(0);
                 JSONArray sched_locs = sched_seg.getJSONArray("schedule_location");
 
@@ -172,7 +164,6 @@ public class VSTPHandler implements NRODListener
                     Double.parseDouble(vstpToCifTime(sched_locs.getJSONObject(sched_locs.length()-1).getString("scheduled_arrival_time")).replace("H", ".5")));
                 psBS.setString(15, String.join(",", tds));
                 psBS.executeUpdate();
-                //NRODLight.printOut("[VSTP] Done create/update");
             }
             long time = (System.nanoTime() - start)/1000000L;
 

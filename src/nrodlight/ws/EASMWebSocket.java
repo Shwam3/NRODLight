@@ -39,6 +39,7 @@ import java.util.stream.Collectors;
 public class EASMWebSocket extends WebSocketServer
 {
     private static final AtomicBoolean serverClosed = new AtomicBoolean(false);
+    private static String delayData = null;
 
     public EASMWebSocket()
     {
@@ -221,5 +222,15 @@ public class EASMWebSocket extends WebSocketServer
             NRODLight.printErr("[WebSocket] " + message);
         else
             NRODLight.printOut("[WebSocket] " + message);
+    }
+
+    public static void setDelayData(String delayData)
+    {
+        EASMWebSocket.delayData = delayData;
+    }
+
+    public static String getDelayData()
+    {
+        return delayData;
     }
 }
