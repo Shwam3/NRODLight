@@ -15,12 +15,9 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Date;
 import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
 
 public class VSTPHandler implements NRODListener
 {
@@ -88,7 +85,7 @@ public class VSTPHandler implements NRODListener
                 JSONArray sched_locs = sched_seg.getJSONArray("schedule_location");
 
                 PreparedStatement psBS = conn.prepareStatement("INSERT INTO schedules (schedule_uid, date_from, date_to, stp_indicator, schedule_source, days_run, "
-                    + "identity, runs_mon, runs_tue, runs_wed, runs_thu, runs_fri, runs_sat, runs_sun, over_midnight, tds) VALUES (?,?,?,?,'V',?,?,?,?,?,?,?,?,?,?,?)");
+                    + "identity, runs_mon, runs_tue, runs_wed, runs_thu, runs_fri, runs_sat, runs_sun, over_midnight) VALUES (?,?,?,?,'V',?,?,?,?,?,?,?,?,?,?)");
                 PreparedStatement psLO = conn.prepareStatement("INSERT INTO schedule_locations (schedule_uid, date_from, stp_indicator, schedule_source, tiploc, scheduled_arrival, scheduled_departure, scheduled_pass, type, loc_index) VALUES (?,?,?,'V',?,'',?,'','O',0)");
                 PreparedStatement psLI = conn.prepareStatement("INSERT INTO schedule_locations (schedule_uid, date_from, stp_indicator, schedule_source, tiploc, scheduled_arrival, scheduled_departure, scheduled_pass, type, loc_index) VALUES (?,?,?,'V',?,?,?,?,'I',?)");
                 PreparedStatement psLT = conn.prepareStatement("INSERT INTO schedule_locations (schedule_uid, date_from, stp_indicator, schedule_source, tiploc, scheduled_arrival, scheduled_departure, scheduled_pass, type, loc_index) VALUES (?,?,?,'V',?,?,'','','T',?)");
@@ -108,20 +105,11 @@ public class VSTPHandler implements NRODListener
                 for (int i = 0; i < 7; i++)
                     psBS.setBoolean(i+7, days_run.charAt(i) == '1');
 
-                Set<String> tds = new TreeSet<>();
-                PreparedStatement ps = conn.prepareStatement("SELECT td FROM smart INNER JOIN corpus ON corpus.stanox = smart.stanox WHERE tiploc = ?");
-
                 int loc_index = 0;
                 for (Object loc_o : sched_locs)
                 {
                     JSONObject loc = (JSONObject) loc_o;
                     String tiploc = loc.getJSONObject("location").getJSONObject("tiploc").getString("tiploc_id");
-                    ps.setString(1, tiploc);
-                    try(ResultSet rs = ps.executeQuery())
-                    {
-                        if (rs.next())
-                            tds.add(rs.getString(1));
-                    }
 
                     if (loc_index == 0) // LO
                     {
@@ -162,7 +150,6 @@ public class VSTPHandler implements NRODListener
                 psBS.setBoolean(14,
                  Double.parseDouble(vstpToCifTime(sched_locs.getJSONObject(0).getString("scheduled_departure_time")).replace("H", ".5")) >
                     Double.parseDouble(vstpToCifTime(sched_locs.getJSONObject(sched_locs.length()-1).getString("scheduled_arrival_time")).replace("H", ".5")));
-                psBS.setString(15, String.join(",", tds));
                 psBS.executeUpdate();
             }
             long time = (System.nanoTime() - start)/1000000L;

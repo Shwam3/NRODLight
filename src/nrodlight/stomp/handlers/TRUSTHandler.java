@@ -61,7 +61,7 @@ public class TRUSTHandler implements NRODListener
         {
             Connection conn = DBHandler.getConnection();
             PreparedStatement ps0001 = conn.prepareStatement("INSERT INTO activations (train_id,train_id_current,start_timestamp,schedule_uid,schedule_date_from," +
-                    "schedule_date_to,stp_indicator,schedule_source,wtt_id,creation_timestamp,next_expected_update,last_update) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) " +
+                    "schedule_date_to,stp_indicator,schedule_source,creation_timestamp,next_expected_update,last_update) VALUES (?,?,?,?,?,?,?,?,?,?,?) " +
                     "ON DUPLICATE KEY UPDATE next_expected_update=?, start_timestamp=?, last_update=?");
             PreparedStatement ps0002_0005 = conn.prepareStatement("UPDATE activations SET cancelled=?, last_update=? WHERE train_id=?");
             PreparedStatement ps0003_update = conn.prepareStatement("UPDATE activations SET current_delay=?, last_update=?, " +
@@ -99,15 +99,14 @@ public class TRUSTHandler implements NRODListener
                             else
                                 ps0001.setString(7, body.getString("schedule_type"));
                             ps0001.setString(8, body.getString("schedule_source"));
-                            ps0001.setString(9, body.getString("schedule_wtt_id"));
                             long creation_timestamp = Long.parseLong(body.getString("creation_timestamp"));
-                            ps0001.setLong(10, creation_timestamp);
-                            ps0001.setLong(11, origin_dep_timestamp);
-                            ps0001.setLong(12, creation_timestamp);
+                            ps0001.setLong(9, creation_timestamp);
+                            ps0001.setLong(10, origin_dep_timestamp);
+                            ps0001.setLong(11, creation_timestamp);
 
+                            ps0001.setLong(12, origin_dep_timestamp);
                             ps0001.setLong(13, origin_dep_timestamp);
-                            ps0001.setLong(14, origin_dep_timestamp);
-                            ps0001.setLong(15, creation_timestamp);
+                            ps0001.setLong(14, creation_timestamp);
 
                             ps0001.execute();
                             break;
