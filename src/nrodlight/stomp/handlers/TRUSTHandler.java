@@ -15,8 +15,13 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.Date;
 import java.util.Map;
 import java.util.TimeZone;
@@ -60,19 +65,58 @@ public class TRUSTHandler implements NRODListener
         try
         {
             Connection conn = DBHandler.getConnection();
-            PreparedStatement ps0001 = conn.prepareStatement("INSERT INTO activations (train_id,train_id_current,start_timestamp,schedule_uid,schedule_date_from," +
-                    "schedule_date_to,stp_indicator,schedule_source,creation_timestamp,next_expected_update,last_update) VALUES (?,?,?,?,?,?,?,?,?,?,?) " +
-                    "ON DUPLICATE KEY UPDATE next_expected_update=?, start_timestamp=?, last_update=?");
-            PreparedStatement ps0002_0005 = conn.prepareStatement("UPDATE activations SET cancelled=?, last_update=? WHERE train_id=?");
-            PreparedStatement ps0003_update = conn.prepareStatement("UPDATE activations SET current_delay=?, last_update=?, " +
-                    "next_expected_update=?, finished=?, off_route=0 WHERE train_id=?");
-            //PreparedStatement ps0003_get_dep = conn.prepareStatement("SELECT scheduled_arrival,scheduled_departure,schedules_pass FROM schedule_locations l " +
-            //        "INNER JOIN activations a ON l.schedule_uid=a.schedule_uid AND a.schedule_date_from=l.date_from AND " +
-            //        "l.stp_indicator=a.stp_indicator LEFT JOIN corpus c ON l.tiploc=c.tiploc WHERE a.train_id=? AND " +
-            //        "stanox=? AND scheduled_arrival=? OR scheduled_pass=?)");
-            PreparedStatement ps0003_offroute = conn.prepareStatement("UPDATE activations SET off_route=1, last_update=?, finished=? WHERE train_id=?");
-            PreparedStatement ps0006 = conn.prepareStatement("UPDATE activations SET next_expected_update=?, last_update=? WHERE train_id=?");
-            PreparedStatement ps0007 = conn.prepareStatement("UPDATE activations SET train_id_current=?, last_update=? WHERE train_id=?");
+            PreparedStatement ps0001_starttime_smart = conn.prepareStatement("SELECT scheduled_departure," +
+                    "scheduled_pass FROM schedule_locations l INNER JOIN corpus c ON l.tiploc=c.tiploc INNER JOIN smart " +
+                    "s ON c.stanox=s.stanox WHERE schedule_uid=? AND date_from=? AND stp_indicator=? AND " +
+                    "schedule_source=? AND s.reports=1 ORDER BY loc_index ASC LIMIT 1");
+            PreparedStatement ps0001_starttime_any = conn.prepareStatement("SELECT scheduled_departure FROM " +
+                    "schedule_locations WHERE schedule_uid=? AND date_from=? AND stp_indicator=? AND schedule_source=? " +
+                    "AND loc_index=0");
+            PreparedStatement ps0001 = conn.prepareStatement("INSERT INTO activations (train_id,train_id_current," +
+                    "start_timestamp,schedule_uid,schedule_date_from,schedule_date_to,stp_indicator,schedule_source," +
+                    "creation_timestamp,next_expected_update,last_update) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE " +
+                    "KEY UPDATE next_expected_update=?, start_timestamp=?, last_update=?");
+            PreparedStatement ps0002_0005 = conn.prepareStatement("UPDATE activations SET cancelled=?, last_update=? " +
+                    "WHERE train_id=?");
+            PreparedStatement ps0003_update = conn.prepareStatement("UPDATE activations SET current_delay=?, " +
+                    "last_update=?, last_update_tiploc=COALESCE((SELECT tiploc FROM corpus WHERE stanox=? LIMIT 1), ?), " +
+                    "next_expected_update=?, next_expected_tiploc=COALESCE((SELECT tiploc FROM corpus WHERE stanox=? " +
+                    "LIMIT 1), ?), finished=?, off_route=0 WHERE train_id=? AND last_update<=?");
+            //PreparedStatement ps0003_current_loc = conn.prepareStatement("SELECT l.tiploc,scheduled_arrival," +
+            //        "scheduled_departure,scheduled_pass FROM schedule_locations l INNER JOIN activations a ON " +
+            //        "l.schedule_uid=a.schedule_uid AND a.schedule_date_from=l.date_from AND " +
+            //        "l.stp_indicator=a.stp_indicator AND l.schedule_source=a.schedule_source INNER JOIN corpus c ON " +
+            //        "l.tiploc=c.tiploc WHERE AND a.train_id=? AND c.stanox=? ORDER BY loc_index ASC");
+            //PreparedStatement ps0003_get_dep = conn.prepareStatement("SELECT l.tiploc,scheduled_arrival," +
+            //        "scheduled_departure,scheduled_pass FROM schedule_locations l INNER JOIN activations a ON " +
+            //        "l.schedule_uid=a.schedule_uid AND a.schedule_date_from=l.date_from AND " +
+            //        "l.stp_indicator=a.stp_indicator AND l.schedule_source=a.schedule_source INNER JOIN corpus c ON " +
+            //        "l.tiploc=c.tiploc INNER JOIN smart s ON c.stanox=s.stanox WHERE s.reports=1 AND a.train_id=? AND " +
+            //        "(scheduled_arrival=? OR scheduled_pass=?) ORDER BY loc_index ASC LIMIT 1");
+            PreparedStatement ps0003_next_update_arr = conn.prepareStatement("SELECT l.tiploc,c.stanox," +
+                    "scheduled_arrival,scheduled_departure,scheduled_pass FROM schedule_locations l INNER JOIN " +
+                    "activations a ON l.schedule_uid=a.schedule_uid AND a.schedule_date_from=l.date_from AND " +
+                    "l.stp_indicator=a.stp_indicator AND l.schedule_source=a.schedule_source INNER JOIN corpus c ON " +
+                    "l.tiploc=c.tiploc INNER JOIN smart s ON c.stanox=s.stanox WHERE a.train_id=? AND s.reports=1 AND " +
+                    "loc_index>=(SELECT loc_index FROM schedule_locations l2 INNER JOIN activations a2 ON " +
+                    "l2.schedule_uid=a2.schedule_uid AND l2.date_from=a2.schedule_date_from AND " +
+                    "l2.stp_indicator=a2.stp_indicator AND l2.schedule_source=a2.schedule_source WHERE a2.train_id=? AND " +
+                    "(l2.scheduled_arrival=? OR l2.scheduled_pass=?)) ORDER BY loc_index ASC LIMIT 1");
+            PreparedStatement ps0003_next_update_dep = conn.prepareStatement("SELECT l.tiploc,c.stanox," +
+                    "scheduled_arrival,scheduled_departure,scheduled_pass FROM schedule_locations l INNER JOIN " +
+                    "activations a ON l.schedule_uid=a.schedule_uid AND a.schedule_date_from=l.date_from AND " +
+                    "l.stp_indicator=a.stp_indicator AND l.schedule_source=a.schedule_source INNER JOIN corpus c ON " +
+                    "l.tiploc=c.tiploc INNER JOIN smart s ON c.stanox=s.stanox WHERE a.train_id=? AND s.reports=1 AND " +
+                    "loc_index>(SELECT loc_index FROM schedule_locations l2 INNER JOIN activations a2 ON " +
+                    "l2.schedule_uid=a2.schedule_uid AND l2.date_from=a2.schedule_date_from AND " +
+                    "l2.stp_indicator=a2.stp_indicator AND l2.schedule_source=a2.schedule_source WHERE a2.train_id=? AND " +
+                    "(l2.scheduled_departure=? OR l2.scheduled_pass=?)) ORDER BY loc_index ASC LIMIT 1");
+            PreparedStatement ps0003_offroute = conn.prepareStatement("UPDATE activations SET off_route=1, " +
+                    "last_update=?, finished=? WHERE train_id=? AND last_update<=?");
+            PreparedStatement ps0006 = conn.prepareStatement("UPDATE activations SET next_expected_update=?, " +
+                    "last_update=? WHERE train_id=? AND next_expected_update<=? AND last_update<=?");
+            PreparedStatement ps0007 = conn.prepareStatement("UPDATE activations SET train_id_current=?, " +
+                    "last_update=? WHERE train_id=?");
             PreparedStatement ps0008 = conn.prepareStatement("UPDATE activations SET last_update=? WHERE train_id=?");
 
             for (Object msgObj : messageList)
@@ -80,24 +124,70 @@ public class TRUSTHandler implements NRODListener
                 JSONObject map = (JSONObject)msgObj;
                 JSONObject header = map.getJSONObject("header");
                 JSONObject body = map.getJSONObject("body");
+                long messageTime = Long.parseLong(header.getString("msg_queue_timestamp"));
                 try
                 {
                     switch (header.getString("msg_type"))
                     {
                         case "0001": // Activation
+                            if ("O".equals(body.getString("schedule_type")))
+                                body.put("schedule_type", "P");
+                            else if ("P".equals(body.getString("schedule_type")))
+                                body.put("schedule_type", "O");
+
+                            String scheduled_departure = null;
+                            ps0001_starttime_smart.setString(1, body.getString("train_uid"));
+                            ps0001_starttime_smart.setString(2, body.getString("schedule_start_date").substring(2).replace("-", ""));
+                            ps0001_starttime_smart.setString(3, body.getString("schedule_type"));
+                            ps0001_starttime_smart.setString(4, body.getString("schedule_source"));
+                            try (ResultSet rs = ps0001_starttime_smart.executeQuery())
+                            {
+                                if (rs.next())
+                                {
+                                    if (rs.getString(1) != null && !"     ".equals(rs.getString(1)))
+                                        scheduled_departure = rs.getString(1);
+                                    else if (rs.getString(2) != null && !"     ".equals(rs.getString(2)))
+                                        scheduled_departure = rs.getString(2);
+                                }
+                            }
+                            catch (SQLException s) { NRODLight.printThrowable(s, "TRUST"); }
+
+                            if (scheduled_departure == null)
+                            {
+                                ps0001_starttime_any.setString(1, body.getString("train_uid"));
+                                ps0001_starttime_any.setString(2, body.getString("schedule_start_date").substring(2).replace("-", ""));
+                                ps0001_starttime_any.setString(3, body.getString("schedule_type"));
+                                ps0001_starttime_any.setString(4, body.getString("schedule_source"));
+                                try (ResultSet rs = ps0001_starttime_any.executeQuery())
+                                {
+                                    while (rs.next())
+                                        scheduled_departure = rs.getString(1);
+                                } catch (SQLException s) { NRODLight.printThrowable(s, "TRUST"); }
+                            }
+
+                            long origin_dep_timestamp;
+                            if (scheduled_departure != null)
+                            {
+                                int hh = Integer.parseInt(scheduled_departure.substring(0, 2));
+                                int mm = Integer.parseInt(scheduled_departure.substring(2, 4));
+                                int ss = "H".equals(scheduled_departure.substring(4)) ? 30 : 0;
+
+                                LocalDateTime todayMidnight = LocalDateTime.of(LocalDate.now(ZoneId.systemDefault()), LocalTime.of(hh, mm, ss));
+                                if (Integer.parseInt(body.getString("train_id").substring(8)) != todayMidnight.getDayOfMonth())
+                                    origin_dep_timestamp = todayMidnight.plusDays(1).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+                                else
+                                    origin_dep_timestamp = todayMidnight.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+                            }
+                            else
+                                origin_dep_timestamp = fixTimestamp(Long.parseLong(body.getString("origin_dep_timestamp")));
+
                             ps0001.setString(1, body.getString("train_id"));
                             ps0001.setString(2, body.getString("train_id"));
-                            long origin_dep_timestamp = fixTimestamp(Long.parseLong(body.getString("origin_dep_timestamp")));
                             ps0001.setLong(3, origin_dep_timestamp);
                             ps0001.setString(4, body.getString("train_uid").replace(" ", "O"));
                             ps0001.setString(5, body.getString("schedule_start_date").substring(2).replace("-", ""));
                             ps0001.setString(6, body.getString("schedule_end_date").substring(2).replace("-", ""));
-                            if ("O".equals(body.getString("schedule_type")))
-                                ps0001.setString(7, "P");
-                            else if ("P".equals(body.getString("schedule_type")))
-                                ps0001.setString(7, "O");
-                            else
-                                ps0001.setString(7, body.getString("schedule_type"));
+                            ps0001.setString(7, body.getString("schedule_type"));
                             ps0001.setString(8, body.getString("schedule_source"));
                             long creation_timestamp = Long.parseLong(body.getString("creation_timestamp"));
                             ps0001.setLong(9, creation_timestamp);
@@ -122,22 +212,118 @@ public class TRUSTHandler implements NRODListener
                         case "0003": // Movement
                             if ("false".equals(body.getString("correction_ind")))
                             {
+                                double delay = 0;
+                                long next_expected_update = -1;
+                                long at = fixTimestamp(Long.parseLong(body.getString("actual_timestamp")));
+                                String next_expected_tiploc = null;
                                 if ("true".equals(body.getString("offroute_ind")) || "OFF ROUTE".equals(body.getString("timetable_variation")))
                                 {
-                                    ps0003_offroute.setLong(1, System.currentTimeMillis());
+                                    ps0003_offroute.setLong(1, messageTime);
                                     ps0003_offroute.setBoolean(2, "true".equals(body.getString("train_terminated")));
                                     ps0003_offroute.setString(3, body.getString("train_id"));
+                                    ps0003_offroute.setLong(4, at);
                                     ps0003_offroute.execute();
                                 }
-                                else if ("DEPARTURE".equals(body.get("event_type")) || "ARRIVAL".equals(body.get("event_type")))
+                                else if ("DEPARTURE".equals(body.get("event_type")))
                                 {
-                                    ps0003_update.setInt(1, Integer.parseInt(body.getString("timetable_variation")) *
-                                            ("EARLY".equals(body.getString("variation_status")) ? - 1 : 1));
-                                    ps0003_update.setLong(2, System.currentTimeMillis());
-                                    ps0003_update.setLong(3, fixTimestamp(Long.parseLong(body.getString("actual_timestamp"))) +
-                                            ("".equals(body.getString("next_report_run_time")) ? 0L : Long.parseLong(body.getString("next_report_run_time"))*60000L));
-                                    ps0003_update.setBoolean(4, "true".equals(body.getString("train_terminated")));
-                                    ps0003_update.setString(5, body.getString("train_id"));
+                                    long pt = fixTimestamp(Long.parseLong(body.getString("planned_timestamp")));
+                                    delay = (at - pt) / 60000d;
+
+                                    ps0003_next_update_dep.setString(1, body.getString("train_id"));
+                                    ps0003_next_update_dep.setString(2, body.getString("train_id"));
+                                    String time = cifTime(pt);
+                                    ps0003_next_update_dep.setString(3, time);
+                                    ps0003_next_update_dep.setString(4, time);
+                                    try (ResultSet rs = ps0003_next_update_dep.executeQuery()) {
+                                        if (rs.next())
+                                        {
+                                            next_expected_tiploc = rs.getString(1);
+
+                                            if (rs.getString(3) != null && !rs.getString(3).trim().isEmpty())
+                                                next_expected_update = timeCif(rs.getString(3), pt);
+                                            else if (rs.getString(4) != null && !rs.getString(4).trim().isEmpty())
+                                                next_expected_update = timeCif(rs.getString(4), pt);
+                                            else if (rs.getString(5) != null && !rs.getString(5).trim().isEmpty())
+                                                next_expected_update = timeCif(rs.getString(5), pt);
+                                        }
+                                        else
+                                        {
+                                            next_expected_update = -2;
+                                        }
+                                    } catch (SQLException s) { NRODLight.printThrowable(s, "TRUST"); }
+
+                                    if (next_expected_update == -1)
+                                    {
+                                        next_expected_tiploc = body.getString("next_report_stanox");
+                                        next_expected_update = at + ("".equals(body.getString("next_report_run_time")) ? 0L : Long.parseLong(body.getString("next_report_run_time"))*60000L);
+                                    }
+
+                                    // TODO: find next SMART reporting location from schedule to use as
+                                    //  next_expected_update time or set to -1 if no further location in schedule,
+                                    //  use next run time (current method) if no matching schedule found.
+                                    //  Done I think?
+                                }
+                                else if ("ARRIVAL".equals(body.get("event_type")))
+                                {
+                                    long pt = fixTimestamp(Long.parseLong(body.getString("planned_timestamp")));
+                                    delay = (at - pt) / 60000d;
+
+                                    ps0003_next_update_arr.setString(1, body.getString("train_id"));
+                                    ps0003_next_update_arr.setString(2, body.getString("train_id"));
+                                    String time = cifTime(pt);
+                                    ps0003_next_update_arr.setString(3, time);
+                                    ps0003_next_update_arr.setString(4, time);
+                                    try (ResultSet rs = ps0003_next_update_arr.executeQuery()) {
+                                        if (rs.next())
+                                        {
+                                            //NRODLight.printOut(String.format("[Debug] tid %s, stanox %s, tiploc %s, " +
+                                            //                "stanox %s, arr '%s', dep '%s', pass '%s'",
+                                            //        body.getString("train_id"), body.getString("loc_stanox"),
+                                            //        rs.getString(1), rs.getString(2),
+                                            //        rs.getString(3), rs.getString(4),
+                                            //        rs.getString(5)));
+
+                                            next_expected_tiploc = rs.getString(1);
+
+                                            if (body.getString("loc_stanox").equals(rs.getString(2)))
+                                            {
+                                                if (rs.getString(4) != null  && !rs.getString(4).trim().isEmpty())
+                                                    next_expected_update = timeCif(rs.getString(4), pt);
+                                                else if (rs.getString(5) != null && !rs.getString(5).trim().isEmpty())
+                                                    next_expected_update = timeCif(rs.getString(5), pt);
+                                            }
+                                            else if (rs.getString(3) != null  && !rs.getString(3).trim().isEmpty())
+                                                next_expected_update = timeCif(rs.getString(3), pt);
+                                            else if (rs.getString(4) != null && !rs.getString(4).trim().isEmpty())
+                                                next_expected_update = timeCif(rs.getString(4), pt);
+                                            else if (rs.getString(5) != null && !rs.getString(5).trim().isEmpty())
+                                                next_expected_update = timeCif(rs.getString(5), pt);
+                                        }
+                                        else
+                                        {
+                                            next_expected_update = -2;
+                                        }
+                                    } catch (SQLException s) { NRODLight.printThrowable(s, "TRUST"); }
+
+                                    if (next_expected_update == -1)
+                                    {
+                                        next_expected_tiploc = body.getString("next_report_stanox");
+                                        next_expected_update = at + ("".equals(body.getString("next_report_run_time")) ? 0L : Long.parseLong(body.getString("next_report_run_time"))*60000L);
+                                    }
+                                }
+
+                                if (next_expected_update != -1)
+                                {
+                                    ps0003_update.setDouble(1, delay);
+                                    ps0003_update.setLong(2, at);
+                                    ps0003_update.setString(3, body.getString("loc_stanox"));
+                                    ps0003_update.setString(4, body.getString("loc_stanox"));
+                                    ps0003_update.setLong(5, next_expected_update == -2 ? -1 : next_expected_update);
+                                    ps0003_update.setString(6, next_expected_tiploc);
+                                    ps0003_update.setString(7, next_expected_tiploc);
+                                    ps0003_update.setBoolean(8, "true".equals(body.getString("train_terminated")));
+                                    ps0003_update.setString(9, body.getString("train_id"));
+                                    ps0003_update.setLong(10, at);
                                     ps0003_update.execute();
                                 }
                             }
@@ -152,9 +338,13 @@ public class TRUSTHandler implements NRODListener
                             break;
 
                         case "0006": // Change Origin
-                            ps0006.setLong(1, Long.parseLong(body.getString("coo_timestamp")));
-                            ps0006.setLong(2, fixTimestamp(Long.parseLong(body.getString("dep_timestamp"))));
+                            long dt = fixTimestamp(Long.parseLong(body.getString("dep_timestamp")));
+                            long ct = fixTimestamp(Long.parseLong(body.getString("coo_timestamp")));
+                            ps0006.setLong(1, dt);
+                            ps0006.setLong(2, ct);
                             ps0006.setString(3, body.getString("train_id"));
+                            ps0006.setLong(4, dt);
+                            ps0006.setLong(5, ct);
 
                             ps0006.execute();
                             break;
@@ -175,7 +365,8 @@ public class TRUSTHandler implements NRODListener
                             break;
                     }
                 }
-                catch (SQLException ex) { NRODLight.printThrowable(ex, "TRUST"); }
+                //catch (SQLException ex) { NRODLight.printThrowable(ex, "TRUST"); }
+                catch (Exception ex) { NRODLight.printThrowable(ex, "TRUST"); }
 
                 printTRUST(map.toString(), false);
             }
@@ -193,10 +384,32 @@ public class TRUSTHandler implements NRODListener
         return timestamp - (TimeZone.getDefault().inDaylightTime(new Date(timestamp)) ? 3600000L : 0L);
     }
 
+    private static String cifTime(String timestamp, boolean fix)
+    {
+        if (fix)
+            return cifTime(fixTimestamp(Long.parseLong(timestamp)));
+        return cifTime(Long.parseLong(timestamp));
+    }
+
     private static String cifTime(long timestamp)
     {
         String s = cifTime.format(new Date(timestamp));
         return s.substring(0, 4) + (s.endsWith("30") ? "H" : "");
+    }
+
+    private static long timeCif(String s, long refTimestamp)
+    {
+        //NRODLight.printOut("[Debug] '" + s + "' '" + refTimestamp + "'");
+
+        int hh = Integer.parseInt(s.substring(0, 2));
+        int mm = Integer.parseInt(s.substring(2, 4));
+        int ss = "H".equals(s.substring(4)) ? 30 : 0;
+
+        LocalDateTime time = LocalDateTime.of(LocalDate.now(ZoneId.systemDefault()), LocalTime.of(hh, mm, ss));
+        long out = time.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        if (out < refTimestamp)
+            return time.plusDays(1).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        return out;
     }
 
     public long getTimeout() { return System.currentTimeMillis() - lastMessageTime; }

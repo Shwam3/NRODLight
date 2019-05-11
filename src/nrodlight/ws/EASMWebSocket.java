@@ -2,6 +2,7 @@ package nrodlight.ws;
 
 import nrodlight.NRODLight;
 import nrodlight.RateMonitor;
+import nrodlight.db.DBHandler;
 import org.java_websocket.WebSocket;
 import org.java_websocket.framing.CloseFrame;
 import org.java_websocket.handshake.ClientHandshake;
@@ -30,6 +31,10 @@ import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
@@ -39,7 +44,7 @@ import java.util.stream.Collectors;
 public class EASMWebSocket extends WebSocketServer
 {
     private static final AtomicBoolean serverClosed = new AtomicBoolean(false);
-    private static String delayData = null;
+    private static JSONObject delayData = null;
 
     public EASMWebSocket()
     {
@@ -224,12 +229,62 @@ public class EASMWebSocket extends WebSocketServer
             NRODLight.printOut("[WebSocket] " + message);
     }
 
-    public static void setDelayData(String delayData)
+    public static JSONObject updateDelayData() throws SQLException
     {
-        EASMWebSocket.delayData = delayData;
+        long start = System.nanoTime();
+
+        Connection conn = DBHandler.getConnection();
+        //PreparedStatement psDelayData = conn.prepareStatement("SELECT a.train_id,a.train_id_current," +
+        //        "a.schedule_uid,a.start_timestamp,a.current_delay,a.next_expected_update,a.off_route," +
+        //        "a.finished,GROUP_CONCAT(DISTINCT s.td ORDER BY s.td SEPARATOR ',') AS tds FROM " +
+        //        "activations a INNER JOIN schedule_locations l ON a.schedule_uid = l.schedule_uid AND " +
+        //        "a.stp_indicator = l.stp_indicator AND a.schedule_date_from = l.date_from AND " +
+        //        "a.schedule_source = l.schedule_source INNER JOIN corpus c ON l.tiploc = c.tiploc INNER " +
+        //        "JOIN smart s ON c.stanox = s.stanox WHERE (a.last_update > ?) AND (a.finished = 0 OR " +
+        //        "a.last_update > ?) AND a.cancelled = 0 GROUP BY a.train_id");
+        //psDelayData.setLong(1, System.currentTimeMillis() - 43200000L); // 12 hours
+        //psDelayData.setLong(2, System.currentTimeMillis() - 2700000L); // 45 mins
+        PreparedStatement psDelayData = conn.prepareStatement("SELECT a.train_id,a.train_id_current,a.schedule_uid," +
+                "a.start_timestamp,a.current_delay,a.next_expected_update,a.off_route,a.finished,GROUP_CONCAT(DISTINCT " +
+                "s.td ORDER BY s.td SEPARATOR ',') AS tds FROM activations a INNER JOIN schedule_locations l ON " +
+                "a.schedule_uid=l.schedule_uid AND a.stp_indicator=l.stp_indicator AND a.schedule_date_from=l.date_from " +
+                "AND a.schedule_source=l.schedule_source INNER JOIN corpus c ON l.tiploc=c.tiploc INNER JOIN smart s ON " +
+                "c.stanox=s.stanox WHERE (a.last_update > (CAST(UNIX_TIMESTAMP(CURTIME(3)) AS INT) - 43200) * 1000) AND " +
+                "(a.finished=0 OR a.last_update > (CAST(UNIX_TIMESTAMP(CURTIME(3)) AS INT) - 2700) * 1000) AND " +
+                "a.cancelled=0 GROUP BY a.train_id");
+        ResultSet r = psDelayData.executeQuery();
+
+        String[] columns = {"train_id","train_id_current","schedule_uid","start_timestamp","current_delay","next_expected_update","off_route","finished","tds"};
+        JSONArray resultData = new JSONArray();
+        while (r.next())
+        {
+            JSONObject jobj = new JSONObject();
+
+            for (int i = 0; i < columns.length; i++)
+            {
+                if ("tds".equals(columns[i]))
+                    jobj.put(columns[i], new JSONArray(r.getString(i+1).split(",")));
+                else
+                    jobj.put(columns[i], r.getObject(i+1));
+            }
+
+            resultData.put(jobj);
+        }
+        r.close();
+        psDelayData.close();
+
+        JSONObject content = new JSONObject();
+        content.put("type", "DELAYS");
+        content.put("timestamp", -1);
+        content.put("timestamp_data", Long.toString(System.currentTimeMillis()));
+        content.put("message", resultData);
+
+        NRODLight.printOut("[Delays] Updated in " + (System.nanoTime() - start) / 1000000d + "ms");
+
+        return EASMWebSocket.delayData = content;
     }
 
-    public static String getDelayData()
+    public static JSONObject getDelayData()
     {
         return delayData;
     }

@@ -1,15 +1,5 @@
 package nrodlight.stomp.handlers;
 
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import nrodlight.NRODLight;
 import nrodlight.RateMonitor;
 import nrodlight.stomp.NRODListener;
@@ -19,6 +9,18 @@ import org.java_websocket.WebSocket;
 import org.java_websocket.exceptions.WebsocketNotConnectedException;
 import org.json.JSONArray;
 import org.json.JSONObject;
+
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class TDHandler implements NRODListener
 {
@@ -193,32 +195,36 @@ public class TDHandler implements NRODListener
         if (NRODLight.webSocket != null)
         {
             Map<String, Map<String, String>> updateAreaMap = new HashMap<>();
-            updateMap.entrySet().forEach(e ->
+            updateMap.forEach((key, value) ->
             {
-                String area = e.getKey().substring(0, 2);
+                String area = key.substring(0, 2);
                 Map<String, String> m = updateAreaMap.getOrDefault(area, new HashMap<>());
-                m.put(e.getKey(), e.getValue());
+                m.put(key, value);
                 updateAreaMap.put(area, m);
             });
 
             Map<String, String> messages = new HashMap<>();
-            for (Map.Entry<String, Map<String, String>> e : updateAreaMap.entrySet())
+            updateAreaMap.forEach((key, value) ->
             {
                 JSONObject container = new JSONObject();
                 JSONObject message = new JSONObject();
                 message.put("type", "SEND_UPDATE");
                 message.put("timestamp", System.currentTimeMillis());
-                message.put("message", e.getValue());
-                if (!e.getKey().isEmpty())
-                    message.put("area", e.getKey());
+                message.put("message", value);
+                if (! key.isEmpty())
+                    message.put("area", key);
                 container.put("Message", message);
 
-                messages.put(e.getKey(), container.toString());
-            }
-            for (WebSocket ws : NRODLight.webSocket.getConnections())
-                if (ws instanceof EASMWebSocketImpl && !ws.isClosed() && ws.isOpen())
-                    try { ((EASMWebSocketImpl) ws).send(messages); }
-                    catch (WebsocketNotConnectedException ex) {}
+                messages.put(key, container.toString());
+            });
+            NRODLight.webSocket.getConnections().stream()
+                    .filter(Objects::nonNull)
+                    .filter(WebSocket::isOpen)
+                    .filter(c -> c instanceof EASMWebSocketImpl)
+                .forEach(ws ->
+            {
+                try { ((EASMWebSocketImpl)ws).send(messages); } catch (WebsocketNotConnectedException ex) {}
+            });
         }
         saveTDData(updateMap);
         RateMonitor.getInstance().onTDMessage((System.currentTimeMillis() - Long.parseLong(headers.get("timestamp")))/1000d,
@@ -230,10 +236,6 @@ public class TDHandler implements NRODListener
         StompConnectionHandler.ack(headers.get("ack"));
     }
 
-    public static String zfill(long l, int len)
-    {
-        return zfill(String.valueOf(l), len);
-    }
     public static String zfill(String s, int len)
     {
         return String.format("%"+len+"s", s).replace(" ", "0");

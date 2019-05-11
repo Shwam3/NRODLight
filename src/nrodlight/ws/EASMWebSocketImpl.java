@@ -14,6 +14,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.StreamSupport;
 
 public class EASMWebSocketImpl extends WebSocketImpl
 {
@@ -163,8 +164,8 @@ public class EASMWebSocketImpl extends WebSocketImpl
                     this.splitFullMessages = splitFullMessagesNew;
 
                     sendAll();
-                    if (EASMWebSocket.getDelayData() != null && delayColourationNew)
-                        send(EASMWebSocket.getDelayData().replace("\"%time%\"", Long.toString(System.currentTimeMillis())));
+                    if (delayColourationNew && EASMWebSocket.getDelayData() != null)
+                        sendDelayData(EASMWebSocket.getDelayData());
                     break;
             }
         }
@@ -178,5 +179,26 @@ public class EASMWebSocketImpl extends WebSocketImpl
     public String toString()
     {
         return EASMWebSocketImpl.class.getName() + ":" + getRemoteSocketAddress().toString() + new JSONArray(areas).toString();
+    }
+
+    public void sendDelayData(JSONObject delayData)
+    {
+        if (!optDelayColouration())
+            return;
+
+        JSONArray delaysDataSend = new JSONArray();
+        StreamSupport.stream(delayData.getJSONArray("message").spliterator(), false)
+                .filter(t -> StreamSupport.stream(((JSONObject) t).getJSONArray("tds").spliterator(), false).anyMatch(o -> areas.contains(o)))
+                .forEach(delaysDataSend::put);
+
+        JSONObject content = new JSONObject();
+        content.put("type", "DELAYS");
+        content.put("timestamp", System.currentTimeMillis());
+        content.put("timestamp_data", delayData.getLong("timestamp_data"));
+        content.put("message", delaysDataSend);
+
+        JSONObject message = new JSONObject();
+        message.put("Message", content);
+        send(message.toString());
     }
 }

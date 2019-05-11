@@ -1,0 +1,8 @@
+Manifest-Version: 1.0
+Ant-Version: Apache Ant 1.9.4
+X-COMMENT: Main-Class will be added automatically by build
+Class-Path: lib/JSON-java.jar lib/Gozirra.jar lib/Java-WebSocket.jar l
+ ib/mariadb-java-connector-2.2.6.jar
+Created-By: 1.8.0_73-b02 (Oracle Corporation)
+Main-Class: nrodlight.NRODLight
+
