@@ -173,7 +173,7 @@ public class VSTPHandler implements NRODListener
     }
 
     public long getTimeout() { return System.currentTimeMillis() - lastMessageTime; }
-    public long getTimeoutThreshold() { return 3600000; }
+    public long getTimeoutThreshold() { return 14400000; }
 
     private static void printVSTP(String message, boolean toErr, long timestamp)
     {

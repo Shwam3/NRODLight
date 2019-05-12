@@ -65,23 +65,24 @@ public class TRUSTHandler implements NRODListener
         try
         {
             Connection conn = DBHandler.getConnection();
-            PreparedStatement ps0001_starttime_smart = conn.prepareStatement("SELECT scheduled_departure," +
-                    "scheduled_pass FROM schedule_locations l INNER JOIN corpus c ON l.tiploc=c.tiploc INNER JOIN smart " +
-                    "s ON c.stanox=s.stanox WHERE schedule_uid=? AND date_from=? AND stp_indicator=? AND " +
-                    "schedule_source=? AND s.reports=1 ORDER BY loc_index ASC LIMIT 1");
-            PreparedStatement ps0001_starttime_any = conn.prepareStatement("SELECT scheduled_departure FROM " +
+            PreparedStatement ps0001_starttime_smart = conn.prepareStatement("SELECT l.tiploc,scheduled_arrival," +
+                    "scheduled_departure,scheduled_pass FROM schedule_locations l INNER JOIN corpus c ON " +
+                    "l.tiploc=c.tiploc INNER JOIN smart s ON c.stanox=s.stanox WHERE schedule_uid=? AND date_from=? AND " +
+                    "stp_indicator=? AND schedule_source=? AND s.reports=1 ORDER BY loc_index ASC LIMIT 1");
+            PreparedStatement ps0001_starttime_any = conn.prepareStatement("SELECT tiploc,scheduled_departure FROM " +
                     "schedule_locations WHERE schedule_uid=? AND date_from=? AND stp_indicator=? AND schedule_source=? " +
                     "AND loc_index=0");
             PreparedStatement ps0001 = conn.prepareStatement("INSERT INTO activations (train_id,train_id_current," +
                     "start_timestamp,schedule_uid,schedule_date_from,schedule_date_to,stp_indicator,schedule_source," +
-                    "creation_timestamp,next_expected_update,last_update) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE " +
-                    "KEY UPDATE next_expected_update=?, start_timestamp=?, last_update=?");
+                    "creation_timestamp,next_expected_update,next_expected_tiploc,last_update) VALUES (?,?,?,?,?,?,?,?," +
+                    "?,?,?,?) ON DUPLICATE KEY UPDATE next_expected_update=?, next_expected_tiploc=?, start_timestamp=?, " +
+                    "last_update=?");
             PreparedStatement ps0002_0005 = conn.prepareStatement("UPDATE activations SET cancelled=?, last_update=? " +
                     "WHERE train_id=?");
             PreparedStatement ps0003_update = conn.prepareStatement("UPDATE activations SET current_delay=?, " +
                     "last_update=?, last_update_tiploc=COALESCE((SELECT tiploc FROM corpus WHERE stanox=? LIMIT 1), ?), " +
                     "next_expected_update=?, next_expected_tiploc=COALESCE((SELECT tiploc FROM corpus WHERE stanox=? " +
-                    "LIMIT 1), ?), finished=?, off_route=0 WHERE train_id=? AND last_update<=?");
+                    "LIMIT 1), ?), finished=?, off_route=0 WHERE train_id=? AND (last_update<=? OR 'AUTOMATIC'=?)");
             //PreparedStatement ps0003_current_loc = conn.prepareStatement("SELECT l.tiploc,scheduled_arrival," +
             //        "scheduled_departure,scheduled_pass FROM schedule_locations l INNER JOIN activations a ON " +
             //        "l.schedule_uid=a.schedule_uid AND a.schedule_date_from=l.date_from AND " +
@@ -101,7 +102,8 @@ public class TRUSTHandler implements NRODListener
                     "loc_index>=(SELECT loc_index FROM schedule_locations l2 INNER JOIN activations a2 ON " +
                     "l2.schedule_uid=a2.schedule_uid AND l2.date_from=a2.schedule_date_from AND " +
                     "l2.stp_indicator=a2.stp_indicator AND l2.schedule_source=a2.schedule_source WHERE a2.train_id=? AND " +
-                    "(l2.scheduled_arrival=? OR l2.scheduled_pass=?)) ORDER BY loc_index ASC LIMIT 1");
+                    "(l2.scheduled_arrival=? OR l2.scheduled_pass=?) ORDER BY loc_index ASC LIMIT 1) ORDER BY loc_index " +
+                    "ASC LIMIT 1");
             PreparedStatement ps0003_next_update_dep = conn.prepareStatement("SELECT l.tiploc,c.stanox," +
                     "scheduled_arrival,scheduled_departure,scheduled_pass FROM schedule_locations l INNER JOIN " +
                     "activations a ON l.schedule_uid=a.schedule_uid AND a.schedule_date_from=l.date_from AND " +
@@ -110,7 +112,8 @@ public class TRUSTHandler implements NRODListener
                     "loc_index>(SELECT loc_index FROM schedule_locations l2 INNER JOIN activations a2 ON " +
                     "l2.schedule_uid=a2.schedule_uid AND l2.date_from=a2.schedule_date_from AND " +
                     "l2.stp_indicator=a2.stp_indicator AND l2.schedule_source=a2.schedule_source WHERE a2.train_id=? AND " +
-                    "(l2.scheduled_departure=? OR l2.scheduled_pass=?)) ORDER BY loc_index ASC LIMIT 1");
+                    "(l2.scheduled_departure=? OR l2.scheduled_pass=?) ORDER BY loc_index ASC LIMIT 1) ORDER BY " +
+                    "loc_index ASC LIMIT 1");
             PreparedStatement ps0003_offroute = conn.prepareStatement("UPDATE activations SET off_route=1, " +
                     "last_update=?, finished=? WHERE train_id=? AND last_update<=?");
             PreparedStatement ps0006 = conn.prepareStatement("UPDATE activations SET next_expected_update=?, " +
@@ -136,6 +139,7 @@ public class TRUSTHandler implements NRODListener
                                 body.put("schedule_type", "O");
 
                             String scheduled_departure = null;
+                            String scheduled_departure_tiploc = null;
                             ps0001_starttime_smart.setString(1, body.getString("train_uid"));
                             ps0001_starttime_smart.setString(2, body.getString("schedule_start_date").substring(2).replace("-", ""));
                             ps0001_starttime_smart.setString(3, body.getString("schedule_type"));
@@ -144,10 +148,15 @@ public class TRUSTHandler implements NRODListener
                             {
                                 if (rs.next())
                                 {
-                                    if (rs.getString(1) != null && !"     ".equals(rs.getString(1)))
-                                        scheduled_departure = rs.getString(1);
-                                    else if (rs.getString(2) != null && !"     ".equals(rs.getString(2)))
+                                    if (rs.getString(3) != null && !rs.getString(3).trim().isEmpty())
+                                        scheduled_departure = rs.getString(3);
+                                    else if (rs.getString(4) != null && !rs.getString(4).trim().isEmpty())
+                                        scheduled_departure = rs.getString(4);
+                                    else if (rs.getString(2) != null && !rs.getString(2).trim().isEmpty())
                                         scheduled_departure = rs.getString(2);
+
+                                    if (scheduled_departure != null)
+                                        scheduled_departure_tiploc = rs.getString(1);
                                 }
                             }
                             catch (SQLException s) { NRODLight.printThrowable(s, "TRUST"); }
@@ -160,8 +169,11 @@ public class TRUSTHandler implements NRODListener
                                 ps0001_starttime_any.setString(4, body.getString("schedule_source"));
                                 try (ResultSet rs = ps0001_starttime_any.executeQuery())
                                 {
-                                    while (rs.next())
-                                        scheduled_departure = rs.getString(1);
+                                    if (rs.next())
+                                    {
+                                        scheduled_departure_tiploc = rs.getString(1);
+                                        scheduled_departure = rs.getString(2);
+                                    }
                                 } catch (SQLException s) { NRODLight.printThrowable(s, "TRUST"); }
                             }
 
@@ -192,11 +204,13 @@ public class TRUSTHandler implements NRODListener
                             long creation_timestamp = Long.parseLong(body.getString("creation_timestamp"));
                             ps0001.setLong(9, creation_timestamp);
                             ps0001.setLong(10, origin_dep_timestamp);
-                            ps0001.setLong(11, creation_timestamp);
+                            ps0001.setString(11, scheduled_departure_tiploc);
+                            ps0001.setLong(12, creation_timestamp);
 
-                            ps0001.setLong(12, origin_dep_timestamp);
                             ps0001.setLong(13, origin_dep_timestamp);
-                            ps0001.setLong(14, creation_timestamp);
+                            ps0001.setString(14, scheduled_departure_tiploc);
+                            ps0001.setLong(15, origin_dep_timestamp);
+                            ps0001.setLong(16, creation_timestamp);
 
                             ps0001.execute();
                             break;
@@ -324,6 +338,7 @@ public class TRUSTHandler implements NRODListener
                                     ps0003_update.setBoolean(8, "true".equals(body.getString("train_terminated")));
                                     ps0003_update.setString(9, body.getString("train_id"));
                                     ps0003_update.setLong(10, at);
+                                    ps0003_update.setString(11, body.getString("event_source"));
                                     ps0003_update.execute();
                                 }
                             }

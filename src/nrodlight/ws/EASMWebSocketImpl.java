@@ -169,6 +169,11 @@ public class EASMWebSocketImpl extends WebSocketImpl
                     break;
             }
         }
+        catch(WebsocketNotConnectedException e)
+        {
+            EASMWebSocket.printWebSocket("Client sent message while not connected (" + getReadyState() +
+                    "): \"" + message + "\"", true);
+        }
         catch(JSONException e)
         {
             EASMWebSocket.printWebSocket("Unrecognised message \"" + message + "\"", true);

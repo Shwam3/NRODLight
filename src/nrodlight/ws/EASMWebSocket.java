@@ -185,16 +185,20 @@ public class EASMWebSocket extends WebSocketServer
     @Override
     public void onError(WebSocket conn, Exception ex)
     {
-        String ip = null;
+        String ip = "Unknown";
         if (conn != null)
         {
-            try { ip = conn instanceof EASMWebSocketImpl ? ((EASMWebSocketImpl)conn).getIP() : conn.getRemoteSocketAddress().getAddress().getHostAddress(); }
+            try
+            {
+                ip = conn instanceof EASMWebSocketImpl ? ((EASMWebSocketImpl)conn).getIP() :
+                    conn.getRemoteSocketAddress().getAddress().getHostAddress();
+            }
             catch (Exception e) {}
 
-            printWebSocket("Error (" + (ip != null ? ip : "Unknown") + "):", true);
+            printWebSocket("Error (" + ip + "):", true);
             conn.close(CloseFrame.NORMAL, ex.getMessage());
         }
-        NRODLight.printThrowable(ex, "WebSocket" + (conn != null ? "-" + (ip != null ? ip : "Unknown") : ""));
+        NRODLight.printThrowable(ex, "WebSocket" + (conn != null ? "-" + ip : ""));
     }
 
     @Override
@@ -279,7 +283,7 @@ public class EASMWebSocket extends WebSocketServer
         content.put("timestamp_data", Long.toString(System.currentTimeMillis()));
         content.put("message", resultData);
 
-        NRODLight.printOut("[Delays] Updated in " + (System.nanoTime() - start) / 1000000d + "ms");
+        NRODLight.printOut(String.format("[Delays] Updated in %.2fms", (System.nanoTime() - start) / 1000000d));
 
         return EASMWebSocket.delayData = content;
     }
