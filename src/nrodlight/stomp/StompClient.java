@@ -1,17 +1,18 @@
 package nrodlight.stomp;
 
+import net.ser1.stomp.Command;
+import net.ser1.stomp.Listener;
+import net.ser1.stomp.MessageReceiver;
+import net.ser1.stomp.Receiver;
+import net.ser1.stomp.Stomp;
+
+import javax.security.auth.login.LoginException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.util.HashMap;
 import java.util.Map;
-import javax.security.auth.login.LoginException;
-import net.ser1.stomp.Command;
-import net.ser1.stomp.Listener;
-import net.ser1.stomp.MessageReceiver;
-import net.ser1.stomp.Receiver;
-import net.ser1.stomp.Stomp;
 
 public class StompClient extends Stomp implements MessageReceiver
 {
@@ -132,8 +133,7 @@ public class StompClient extends Stomp implements MessageReceiver
             message.append("\n");
 
             if (header != null)
-                header.keySet().stream()
-                        .forEach((key) -> message.append(key).append(":").append(header.get(key)).append("\n"));
+                header.keySet().forEach((key) -> message.append(key).append(":").append(header.get(key)).append("\n"));
 
             message.append("\n");
 

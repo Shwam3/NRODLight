@@ -77,7 +77,7 @@ public class StompConnectionHandler
         toggleTD();
 
         try { Thread.sleep(100); }
-        catch (InterruptedException e) {}
+        catch (InterruptedException ignored) {}
 
         return true;
     }
@@ -150,7 +150,7 @@ public class StompConnectionHandler
             executor.shutdown();
 
             try { executor.awaitTermination(2, TimeUnit.SECONDS); }
-            catch(InterruptedException e) {}
+            catch(InterruptedException ignored) {}
         }
 
         executor = Executors.newScheduledThreadPool(1);
@@ -232,7 +232,7 @@ public class StompConnectionHandler
                             toggleTRUST();
 
                             try { Thread.sleep(50); }
-                            catch(InterruptedException e) {}
+                            catch(InterruptedException ignored) {}
 
                             toggleTRUST();
                         }
@@ -241,7 +241,7 @@ public class StompConnectionHandler
                             toggleVSTP();
 
                             try { Thread.sleep(50); }
-                            catch(InterruptedException e) {}
+                            catch(InterruptedException ignored) {}
 
                             toggleVSTP();
                         }
@@ -250,7 +250,7 @@ public class StompConnectionHandler
                             toggleTD();
 
                             try { Thread.sleep(50); }
-                            catch(InterruptedException e) {}
+                            catch(InterruptedException ignored) {}
 
                             toggleTD();
                         }
@@ -265,11 +265,6 @@ public class StompConnectionHandler
         }, 10, 10, TimeUnit.SECONDS);
     }
 
-    public static void setMaxTimeoutWait(int maxTimeoutWait)
-    {
-        StompConnectionHandler.maxTimeoutWait = Math.max(600, maxTimeoutWait);
-    }
-
     public static void printStomp(String message, boolean toErr)
     {
         if (toErr)
@@ -278,15 +273,13 @@ public class StompConnectionHandler
             NRODLight.printOut("[Stomp] " + message);
     }
 
-    public static String getConnectionName() { return appID; }
-
     public static void ack(String ackId)
     {
         if (client != null)
             client.ack(ackId);
     }
 
-    public static void toggleTRUST()
+    private static void toggleTRUST()
     {
         if (subscribedTRUST)
         {
@@ -300,7 +293,7 @@ public class StompConnectionHandler
             subscribedTRUST = true;
         }
     }
-    public static void toggleVSTP()
+    private static void toggleVSTP()
     {
         if (subscribedVSTP)
         {
@@ -314,7 +307,7 @@ public class StompConnectionHandler
             subscribedVSTP = true;
         }
     }
-    public static void toggleTD()
+    private static void toggleTD()
     {
         if (subscribedTD)
         {
@@ -328,10 +321,6 @@ public class StompConnectionHandler
             subscribedTD = true;
         }
     }
-
-    public static boolean isSubscribedTRUST() { return subscribedTRUST; }
-    public static boolean isSubscribedVSTP() { return subscribedVSTP; }
-    public static boolean isSubscribedTD() { return subscribedTD; }
 
     public static void printStompHeaders(Map<String, String> headers)
     {

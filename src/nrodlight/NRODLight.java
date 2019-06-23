@@ -142,7 +142,7 @@ public class NRODLight
             printOut("[Startup] File watcher started");
 
             final Path configPath = new File(EASM_STORAGE_DIR, "config.json").toPath();
-            //final Path manualTDPath = new File(EASM_STORAGE_DIR, "set_date.json").toPath();
+            //final Path manualTDPath = new File(EASM_STORAGE_DIR, "set_data.json").toPath();
 
             try (final WatchService watchService = FileSystems.getDefault().newWatchService())
             {
@@ -354,7 +354,7 @@ public class NRODLight
     }
     //</editor-fold>
 
-    private static void ensureServerOpen()
+    public static void ensureServerOpen()
     {
         if (webSocket == null || webSocket.isClosed())
         {

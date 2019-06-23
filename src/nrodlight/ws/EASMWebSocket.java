@@ -29,6 +29,7 @@ import java.security.UnrecoverableKeyException;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.sql.Connection;
@@ -37,7 +38,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Date;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
@@ -51,9 +55,11 @@ public class EASMWebSocket extends WebSocketServer
         super(new InetSocketAddress(NRODLight.config.optInt("WSPort",8443)));
         super.setReuseAddr(true);
 
-        SSLContext sslContext = getSSLContextFromLetsEncrypt();
-        if (sslContext != null)
+        Pair<SSLContext, Date> sslData = getSSLContextFromLetsEncrypt();
+        SSLContext sslContext;
+        if (sslData != null)
         {
+            sslContext = sslData.t;
             List<String> ciphers = Arrays.asList(
                     "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
                     "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
@@ -80,27 +86,38 @@ public class EASMWebSocket extends WebSocketServer
             ciphers = ciphers.stream().filter(ciphersAvailable::contains).collect(Collectors.toList());
 
             setWebSocketFactory(new EASMWebSocketFactory(sslContext, engine.getEnabledProtocols(), ciphers.toArray(new String[0])));
+
+            long delay = sslData.u.getTime() - System.currentTimeMillis() - TimeUnit.HOURS.convert(12, TimeUnit.MILLISECONDS);
+
+            Executors.newSingleThreadScheduledExecutor().schedule(() ->
+            {
+                try { NRODLight.webSocket.stop(0); }
+                catch (InterruptedException ignored) {}
+
+                NRODLight.ensureServerOpen();
+            }, delay, TimeUnit.MILLISECONDS);
         }
         else
             printWebSocket("Unable to create SSL Context", true);
     }
 
-    private SSLContext getSSLContextFromLetsEncrypt()
+    private Pair<SSLContext, Date> getSSLContextFromLetsEncrypt()
     {
         SSLContext context;
+        Date expiry;
         File certDir = new File(NRODLight.EASM_STORAGE_DIR, "certs");
         try
         {
             context = SSLContext.getInstance("TLS");
 
-            //byte[] certBytes = parseDERFromPEM(Files.readAllBytes(new File(certDir , "cert.pem").toPath()), "-----BEGIN CERTIFICATE-----", "-----END CERTIFICATE-----");
             byte[] keyBytes = parseDERFromPEM(Files.readAllBytes(new File(certDir , "privkey.pem").toPath()), "-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----");
 
-            Certificate cert;
-            try (FileInputStream fis = new FileInputStream(new File(certDir, "cert.pem")))
+            X509Certificate cert;
+            try (FileInputStream fis = new FileInputStream(new File(certDir, "fullchain.pem")))
             {
-                cert = CertificateFactory.getInstance("X.509").generateCertificate(fis);
+                cert = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(fis);
             }
+            expiry = cert.getNotAfter();
 
             KeyFactory keyFactory = KeyFactory.getInstance("RSA");
             PrivateKey key = keyFactory.generatePrivate(new PKCS8EncodedKeySpec(keyBytes));
@@ -120,7 +137,7 @@ public class EASMWebSocket extends WebSocketServer
             NRODLight.printThrowable(e, "WebSocket");
             return null;
         }
-        return context;
+        return new Pair<>(context, expiry);
     }
 
     private static byte[] parseDERFromPEM(byte[] pem, String beginDelimiter, String endDelimiter)
@@ -249,16 +266,17 @@ public class EASMWebSocket extends WebSocketServer
         //psDelayData.setLong(1, System.currentTimeMillis() - 43200000L); // 12 hours
         //psDelayData.setLong(2, System.currentTimeMillis() - 2700000L); // 45 mins
         PreparedStatement psDelayData = conn.prepareStatement("SELECT a.train_id,a.train_id_current,a.schedule_uid," +
-                "a.start_timestamp,a.current_delay,a.next_expected_update,a.off_route,a.finished,GROUP_CONCAT(DISTINCT " +
-                "s.td ORDER BY s.td SEPARATOR ',') AS tds FROM activations a INNER JOIN schedule_locations l ON " +
-                "a.schedule_uid=l.schedule_uid AND a.stp_indicator=l.stp_indicator AND a.schedule_date_from=l.date_from " +
-                "AND a.schedule_source=l.schedule_source INNER JOIN corpus c ON l.tiploc=c.tiploc INNER JOIN smart s ON " +
-                "c.stanox=s.stanox WHERE (a.last_update > (CAST(UNIX_TIMESTAMP(CURTIME(3)) AS INT) - 43200) * 1000) AND " +
-                "(a.finished=0 OR a.last_update > (CAST(UNIX_TIMESTAMP(CURTIME(3)) AS INT) - 2700) * 1000) AND " +
-                "a.cancelled=0 GROUP BY a.train_id");
+                "a.start_timestamp,a.current_delay,a.next_expected_update,a.off_route,a.finished,a.last_update," +
+                "GROUP_CONCAT(DISTINCT s.td ORDER BY s.td SEPARATOR ',') AS tds FROM activations a INNER JOIN " +
+                "schedule_locations l ON a.schedule_uid=l.schedule_uid AND a.stp_indicator=l.stp_indicator AND " +
+                "a.schedule_date_from=l.date_from AND a.schedule_source=l.schedule_source INNER JOIN corpus c ON " +
+                "l.tiploc=c.tiploc INNER JOIN smart s ON c.stanox=s.stanox WHERE (a.last_update > " +
+                "(CAST(UNIX_TIMESTAMP(CURTIME(3)) AS INT) - 43200) * 1000) AND (a.finished=0 OR a.last_update > " +
+                "(CAST(UNIX_TIMESTAMP(CURTIME(3)) AS INT) - 2700) * 1000) AND a.cancelled=0 GROUP BY a.train_id");
         ResultSet r = psDelayData.executeQuery();
 
-        String[] columns = {"train_id","train_id_current","schedule_uid","start_timestamp","current_delay","next_expected_update","off_route","finished","tds"};
+        String[] columns = {"train_id","train_id_current","schedule_uid","start_timestamp","current_delay",
+                "next_expected_update","off_route","finished","last_update","tds"};
         JSONArray resultData = new JSONArray();
         while (r.next())
         {
@@ -291,5 +309,15 @@ public class EASMWebSocket extends WebSocketServer
     public static JSONObject getDelayData()
     {
         return delayData;
+    }
+
+    public class Pair<T, U> {
+        public final T t;
+        public final U u;
+
+        public Pair(T t, U u) {
+            this.t= t;
+            this.u= u;
+        }
     }
 }

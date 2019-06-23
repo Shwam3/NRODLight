@@ -271,11 +271,6 @@ public class TRUSTHandler implements NRODListener
                                         next_expected_tiploc = body.getString("next_report_stanox");
                                         next_expected_update = at + ("".equals(body.getString("next_report_run_time")) ? 0L : Long.parseLong(body.getString("next_report_run_time"))*60000L);
                                     }
-
-                                    // TODO: find next SMART reporting location from schedule to use as
-                                    //  next_expected_update time or set to -1 if no further location in schedule,
-                                    //  use next run time (current method) if no matching schedule found.
-                                    //  Done I think?
                                 }
                                 else if ("ARRIVAL".equals(body.get("event_type")))
                                 {
@@ -380,7 +375,6 @@ public class TRUSTHandler implements NRODListener
                             break;
                     }
                 }
-                //catch (SQLException ex) { NRODLight.printThrowable(ex, "TRUST"); }
                 catch (Exception ex) { NRODLight.printThrowable(ex, "TRUST"); }
 
                 printTRUST(map.toString(), false);

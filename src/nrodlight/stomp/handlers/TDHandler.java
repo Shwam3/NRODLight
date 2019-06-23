@@ -136,7 +136,7 @@ public class TDHandler implements NRODListener
 
                         for (int i = 0; i < data.length; i++)
                         {
-                            String address = msgAddr + ":" + Integer.toString(8 - i);
+                            String address = msgAddr + ":" + (8 - i);
                             String dataBit = String.valueOf(data[i]);
 
                             if (!DATA_MAP.containsKey(address) || DATA_MAP.get(address) == null || !dataBit.equals(DATA_MAP.get(address)))
@@ -223,7 +223,8 @@ public class TDHandler implements NRODListener
                     .filter(c -> c instanceof EASMWebSocketImpl)
                 .forEach(ws ->
             {
-                try { ((EASMWebSocketImpl)ws).send(messages); } catch (WebsocketNotConnectedException ex) {}
+                try { ((EASMWebSocketImpl)ws).send(messages); }
+                catch (WebsocketNotConnectedException ignored) {}
             });
         }
         saveTDData(updateMap);
@@ -236,12 +237,12 @@ public class TDHandler implements NRODListener
         StompConnectionHandler.ack(headers.get("ack"));
     }
 
-    public static String zfill(String s, int len)
+    private static String zfill(String s, int len)
     {
         return String.format("%"+len+"s", s).replace(" ", "0");
     }
 
-    public static void saveTDData(Map<String, String> mapToSave)
+    private static void saveTDData(Map<String, String> mapToSave)
     {
         File TDDataDir = new File(NRODLight.EASM_STORAGE_DIR, "TDData");
         if (!mapToSave.isEmpty())

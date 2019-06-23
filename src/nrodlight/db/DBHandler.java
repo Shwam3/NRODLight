@@ -16,7 +16,8 @@ public class DBHandler
         {
             if (conn != null)
                 conn.close();
-            conn = DriverManager.getConnection("jdbc:mariadb://localhost:3306/sigmaps?autoReconnect=true", NRODLight.config.getString("DBUser"), NRODLight.config.getString("DBPassword"));
+            conn = DriverManager.getConnection("jdbc:mariadb://localhost:3306/sigmaps?autoReconnect=true",
+                    NRODLight.config.getString("DBUser"), NRODLight.config.getString("DBPassword"));
         }
 
         return conn;

@@ -56,7 +56,7 @@ public class RateMonitor
         wait.set(Calendar.SECOND, 0);
         wait.add(Calendar.MINUTE, 1);
 
-        Executors.newScheduledThreadPool(1).scheduleAtFixedRate(() ->
+        Executors.newSingleThreadScheduledExecutor().scheduleAtFixedRate(() ->
         {
             try
             {

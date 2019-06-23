@@ -1,11 +1,12 @@
 package nrodlight.ws;
 
-import java.util.List;
-import javax.net.ssl.SSLContext;
 import org.java_websocket.WebSocketAdapter;
 import org.java_websocket.WebSocketImpl;
 import org.java_websocket.drafts.Draft;
 import org.java_websocket.server.CustomSSLWebSocketServerFactory;
+
+import javax.net.ssl.SSLContext;
+import java.util.List;
 
 public class EASMWebSocketFactory extends CustomSSLWebSocketServerFactory
 {
@@ -15,14 +16,14 @@ public class EASMWebSocketFactory extends CustomSSLWebSocketServerFactory
     }
 
     @Override
-    public WebSocketImpl createWebSocket( WebSocketAdapter a, Draft d )
+    public WebSocketImpl createWebSocket(WebSocketAdapter a, Draft d)
     {
-        return new EASMWebSocketImpl( a, d );
+        return new EASMWebSocketImpl(a, d);
     }
 
     @Override
-    public WebSocketImpl createWebSocket( WebSocketAdapter a, List<Draft> d )
+    public WebSocketImpl createWebSocket(WebSocketAdapter a, List<Draft> d)
     {
-        return new EASMWebSocketImpl( a, d );
+        return new EASMWebSocketImpl(a, d);
     }
 }
