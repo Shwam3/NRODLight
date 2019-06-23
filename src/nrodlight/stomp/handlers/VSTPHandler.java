@@ -51,6 +51,7 @@ public class VSTPHandler implements NRODListener
     {
         StompConnectionHandler.printStompHeaders(headers);
 
+
         long start = System.nanoTime();
         JSONObject msg = new JSONObject(message).getJSONObject("VSTPCIFMsgV1");
         printVSTP(message, !msg.has("timestamp"), msg.optLong("timestamp", 0L));
@@ -86,9 +87,9 @@ public class VSTPHandler implements NRODListener
 
                 PreparedStatement psBS = conn.prepareStatement("INSERT INTO schedules (schedule_uid, date_from, date_to, stp_indicator, schedule_source, days_run, "
                     + "identity, runs_mon, runs_tue, runs_wed, runs_thu, runs_fri, runs_sat, runs_sun, over_midnight) VALUES (?,?,?,?,'V',?,?,?,?,?,?,?,?,?,?)");
-                PreparedStatement psLO = conn.prepareStatement("INSERT INTO schedule_locations (schedule_uid, date_from, stp_indicator, schedule_source, tiploc, scheduled_arrival, scheduled_departure, scheduled_pass, type, loc_index) VALUES (?,?,?,'V',?,'',?,'','O',0)");
-                PreparedStatement psLI = conn.prepareStatement("INSERT INTO schedule_locations (schedule_uid, date_from, stp_indicator, schedule_source, tiploc, scheduled_arrival, scheduled_departure, scheduled_pass, type, loc_index) VALUES (?,?,?,'V',?,?,?,?,'I',?)");
-                PreparedStatement psLT = conn.prepareStatement("INSERT INTO schedule_locations (schedule_uid, date_from, stp_indicator, schedule_source, tiploc, scheduled_arrival, scheduled_departure, scheduled_pass, type, loc_index) VALUES (?,?,?,'V',?,?,'','','T',?)");
+                PreparedStatement psLO = conn.prepareStatement("INSERT INTO schedule_locations (schedule_uid, date_from, stp_indicator, schedule_source, tiploc, scheduled_arrival, scheduled_departure, scheduled_pass, type, plat, line, path, activity, eng, pth, prf, loc_index) VALUES (?,?,?,'V',?,'',?,'','O',?,?,?,?,?,?,?,0)");
+                PreparedStatement psLI = conn.prepareStatement("INSERT INTO schedule_locations (schedule_uid, date_from, stp_indicator, schedule_source, tiploc, scheduled_arrival, scheduled_departure, scheduled_pass, type, plat, line, path, activity, eng, pth, prf, loc_index) VALUES (?,?,?,'V',?,?,?,?,'I',?,?,?,?,?,?,?,?)");
+                PreparedStatement psLT = conn.prepareStatement("INSERT INTO schedule_locations (schedule_uid, date_from, stp_indicator, schedule_source, tiploc, scheduled_arrival, scheduled_departure, scheduled_pass, type, plat, line, path, activity, eng, pth, prf, loc_index) VALUES (?,?,?,'V',?,?,'','','T',?,?,?,?,?,?,?,?)");
 
                 String schedule_uid = schedule.getString("CIF_train_uid");
                 String date_from = vstpToCifDate(schedule.getString("schedule_start_date"));
@@ -118,6 +119,13 @@ public class VSTPHandler implements NRODListener
                         psLO.setString(3, stp_indicator);
                         psLO.setString(4, tiploc);
                         psLO.setString(5, vstpToCifTime(loc.getString("scheduled_departure_time")));
+                        psLO.setString(6, loc.getString("CIF_platform"));
+                        psLO.setString(7, loc.getString("CIF_line"));
+                        psLO.setString(8, loc.getString("CIF_path"));
+                        psLO.setString(9, loc.getString("CIF_activity"));
+                        psLO.setString(10, loc.getString("CIF_engineering_allowance"));
+                        psLO.setString(11, loc.getString("CIF_pathing_allowance"));
+                        psLO.setString(12, loc.getString("CIF_performance_allowance"));
                         psLO.executeUpdate();
                     }
                     else if (loc_index == sched_locs.length() - 1) // LT
@@ -130,7 +138,14 @@ public class VSTPHandler implements NRODListener
                         psLT.setString(3, stp_indicator);
                         psLT.setString(4, tiploc);
                         psLT.setString(5, vstpToCifTime(loc.getString("scheduled_arrival_time")));
-                        psLT.setInt(6, loc_index);
+                        psLT.setString(6, loc.getString("CIF_platform"));
+                        psLT.setString(7, loc.getString("CIF_line"));
+                        psLT.setString(8, loc.getString("CIF_path"));
+                        psLT.setString(9, loc.getString("CIF_activity"));
+                        psLT.setString(10, loc.getString("CIF_engineering_allowance"));
+                        psLT.setString(11, loc.getString("CIF_pathing_allowance"));
+                        psLT.setString(12, loc.getString("CIF_performance_allowance"));
+                        psLT.setInt(13, loc_index);
                         psLT.executeUpdate();
                     }
                     else // LI
@@ -142,7 +157,14 @@ public class VSTPHandler implements NRODListener
                         psLI.setString(5, vstpToCifTime(loc.getString("scheduled_arrival_time")));
                         psLI.setString(6, vstpToCifTime(loc.getString("scheduled_departure_time")));
                         psLI.setString(7, vstpToCifTime(loc.getString("scheduled_pass_time")));
-                        psLI.setInt(8, loc_index);
+                        psLI.setString(8, loc.getString("CIF_platform"));
+                        psLI.setString(9, loc.getString("CIF_line"));
+                        psLI.setString(10, loc.getString("CIF_path"));
+                        psLI.setString(11, loc.getString("CIF_activity"));
+                        psLI.setString(12, loc.getString("CIF_engineering_allowance"));
+                        psLI.setString(13, loc.getString("CIF_pathing_allowance"));
+                        psLI.setString(14, loc.getString("CIF_performance_allowance"));
+                        psLI.setInt(15, loc_index);
                         psLI.addBatch();
                     }
                     loc_index++;
