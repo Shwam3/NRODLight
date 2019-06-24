@@ -381,7 +381,7 @@ public class NRODLight
                             webSocket = null;
                             ews.stop(0);
                         }
-                        catch (InterruptedException e) {}
+                        catch (InterruptedException ignored) {}
                     }
                 }
             }, "WebSocket").start();

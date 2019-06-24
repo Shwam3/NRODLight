@@ -51,7 +51,6 @@ public class VSTPHandler implements NRODListener
     {
         StompConnectionHandler.printStompHeaders(headers);
 
-
         long start = System.nanoTime();
         JSONObject msg = new JSONObject(message).getJSONObject("VSTPCIFMsgV1");
         printVSTP(message, !msg.has("timestamp"), msg.optLong("timestamp", 0L));

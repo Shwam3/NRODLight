@@ -13,6 +13,7 @@ import org.json.JSONObject;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLParameters;
 import javax.xml.bind.DatatypeConverter;
 import java.io.File;
 import java.io.FileInputStream;
@@ -38,6 +39,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -52,7 +54,8 @@ public class EASMWebSocket extends WebSocketServer
 
     public EASMWebSocket()
     {
-        super(new InetSocketAddress(NRODLight.config.optInt("WSPort",8443)));
+        super(new InetSocketAddress(NRODLight.config.optInt("WSPort",8443)),
+                Collections.singletonList(new EASMDraft_6455()));
         super.setReuseAddr(true);
 
         Pair<SSLContext, Date> sslData = getSSLContextFromLetsEncrypt();
@@ -68,27 +71,24 @@ public class EASMWebSocket extends WebSocketServer
                     "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256",
                     "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384",
                     "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
-                    "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
-                    "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
-                    "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
-                    "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256",
-                    "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384",
-                    "TLS_DHE_RSA_WITH_AES_128_GCM_SHA256",
-                    "TLS_DHE_RSA_WITH_AES_256_GCM_SHA384",
-                    "TLS_DHE_RSA_WITH_AES_128_CBC_SHA",
-                    "TLS_DHE_RSA_WITH_AES_256_CBC_SHA",
-                    "TLS_DHE_RSA_WITH_AES_128_CBC_SHA256",
-                    "TLS_DHE_RSA_WITH_AES_256_CBC_SHA256"
+                    "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
                 );
+            List<String> protocols = Arrays.asList("TLSv1.2", "TLSv1.3");
 
             SSLEngine engine = sslContext.createSSLEngine();
+
             List<String> ciphersAvailable = Arrays.asList(engine.getEnabledCipherSuites());
             ciphers = ciphers.stream().filter(ciphersAvailable::contains).collect(Collectors.toList());
 
-            setWebSocketFactory(new EASMWebSocketFactory(sslContext, engine.getEnabledProtocols(), ciphers.toArray(new String[0])));
+            List<String> protocolsAvailable = Arrays.asList(engine.getEnabledProtocols());
+            protocols = protocols.stream().filter(protocolsAvailable::contains).collect(Collectors.toList());
+
+            SSLParameters sslParameters = new SSLParameters(ciphers.toArray(new String[0]), protocols.toArray(new String[0]));
+            sslParameters.setUseCipherSuitesOrder(true);
+
+            setWebSocketFactory(new EASMWebSocketFactory(sslContext, sslParameters));
 
             long delay = sslData.u.getTime() - System.currentTimeMillis() - TimeUnit.HOURS.convert(12, TimeUnit.MILLISECONDS);
-
             Executors.newSingleThreadScheduledExecutor().schedule(() ->
             {
                 try { NRODLight.webSocket.stop(0); }
@@ -110,29 +110,39 @@ public class EASMWebSocket extends WebSocketServer
         {
             context = SSLContext.getInstance("TLS");
 
-            byte[] keyBytes = parseDERFromPEM(Files.readAllBytes(new File(certDir , "privkey.pem").toPath()), "-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----");
+            byte[] keyBytes = parseDERFromPEM(Files.readAllBytes(new File(certDir , "privkey.pem").toPath()));
 
             X509Certificate cert;
-            try (FileInputStream fis = new FileInputStream(new File(certDir, "fullchain.pem")))
+            try (FileInputStream fis = new FileInputStream(new File(certDir, "cert.pem")))
             {
                 cert = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(fis);
             }
             expiry = cert.getNotAfter();
+
+            X509Certificate chain;
+            try (FileInputStream fis = new FileInputStream(new File(certDir, "chain.pem")))
+            {
+                chain = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(fis);
+            }
+            if (chain.getNotAfter().getTime() < cert.getNotAfter().getTime())
+                expiry = chain.getNotAfter();
 
             KeyFactory keyFactory = KeyFactory.getInstance("RSA");
             PrivateKey key = keyFactory.generatePrivate(new PKCS8EncodedKeySpec(keyBytes));
 
             KeyStore keystore = KeyStore.getInstance("JKS");
             keystore.load(null);
-            keystore.setCertificateEntry("cert-alias", cert);
-            keystore.setKeyEntry("key-alias", key, new char[0], new Certificate[]{cert});
+            keystore.setCertificateEntry("1", chain);
+            keystore.setCertificateEntry("1", cert);
+            keystore.setKeyEntry("1", key, new char[0], new Certificate[]{cert, chain});
 
             KeyManagerFactory kmf = KeyManagerFactory.getInstance("SunX509");
             kmf.init(keystore, new char[0]);
 
             context.init(kmf.getKeyManagers(), null, null);
         }
-        catch (IOException | KeyManagementException | KeyStoreException | InvalidKeySpecException | UnrecoverableKeyException | NoSuchAlgorithmException | CertificateException e)
+        catch (IOException | KeyManagementException | KeyStoreException | InvalidKeySpecException |
+                UnrecoverableKeyException | NoSuchAlgorithmException | CertificateException e)
         {
             NRODLight.printThrowable(e, "WebSocket");
             return null;
@@ -140,11 +150,11 @@ public class EASMWebSocket extends WebSocketServer
         return new Pair<>(context, expiry);
     }
 
-    private static byte[] parseDERFromPEM(byte[] pem, String beginDelimiter, String endDelimiter)
+    private static byte[] parseDERFromPEM(byte[] pem)
     {
         String data = new String(pem);
-        String[] tokens = data.split(beginDelimiter);
-        tokens = tokens[1].split(endDelimiter);
+        String[] tokens = data.split("-----BEGIN PRIVATE KEY-----");
+        tokens = tokens[1].split("-----END PRIVATE KEY-----");
         return DatatypeConverter.parseBase64Binary(tokens[0]);
     }
 

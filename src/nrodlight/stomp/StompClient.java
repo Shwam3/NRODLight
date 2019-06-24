@@ -57,7 +57,7 @@ public class StompClient extends Stomp implements MessageReceiver
             if (error != null)
                 throw new LoginException(error);
         }
-        catch (InterruptedException e) {}
+        catch (InterruptedException ignored) {}
     }
 
     @Override
@@ -70,13 +70,13 @@ public class StompClient extends Stomp implements MessageReceiver
         listener.interrupt();
 
         try { input.close(); }
-        catch (IOException e) {}
+        catch (IOException ignored) {}
 
         try { output.close(); }
-        catch (IOException e) {}
+        catch (IOException ignored) {}
 
         try { socket.close(); }
-        catch (IOException e) {}
+        catch (IOException ignored) {}
 
         connected = false;
     }

@@ -30,7 +30,7 @@ public class EASMWebSocketImpl extends WebSocketImpl
 
     public EASMWebSocketImpl(WebSocketListener listener, List<Draft> drafts)
     {
-        super(listener, drafts);
+        super(listener, drafts == null || drafts.isEmpty() ? Collections.singletonList(new EASMDraft_6455()) : drafts);
     }
 
     public void setIP(String IP)
