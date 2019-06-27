@@ -142,11 +142,13 @@ public class NRODLight
             printOut("[Startup] File watcher started");
 
             final Path configPath = new File(EASM_STORAGE_DIR, "config.json").toPath();
-            //final Path manualTDPath = new File(EASM_STORAGE_DIR, "set_data.json").toPath();
+            final Path manualTDPath = new File(EASM_STORAGE_DIR, "set_data.json").toPath();
 
             try (final WatchService watchService = FileSystems.getDefault().newWatchService())
             {
-                final WatchKey watchKey = EASM_STORAGE_DIR.toPath().register(watchService, StandardWatchEventKinds.ENTRY_MODIFY);
+                final WatchKey watchKey = EASM_STORAGE_DIR.toPath().register(watchService,
+                        StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_CREATE);
+
                 while (!STOP.get())
                 {
                     final WatchKey wk = watchService.take();
@@ -156,19 +158,23 @@ public class NRODLight
                         {
                             reloadConfig();
                         }
-                        /*else if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE && manualTDPath.equals(event.context()))
+                        else if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE ||
+                                event.kind() == StandardWatchEventKinds.ENTRY_MODIFY &&
+                                event.context() instanceof Path && manualTDPath.endsWith((Path) event.context()))
                         {
                             try
                             {
-                                JSONObject in = new JSONObject(new String(Files.readAllBytes(manualTDPath)));
-                                JSONArray data = in.getJSONArray("data");
-                                data.forEach(x ->
-                                {
-                                    t;
-                                });
+                                JSONObject data = new JSONObject(new String(Files.readAllBytes(manualTDPath)));
+                                final Map<String, String> updateMap = new HashMap<>();
+                                data.keys().forEachRemaining(d -> updateMap.put(d, data.getString(d)));
+
+                                printOut("[TD] Manual TD input received, " + updateMap.size() + " changes");
+                                TDHandler.updateClients(updateMap);
+
+                                Files.deleteIfExists(manualTDPath);
                             }
-                            catch (JSONException | IOException ex) { printThrowable(ex, "FileChangeWatcher"); }
-                        }*/
+                            catch (JSONException | IOException ex) { printThrowable(ex, "TD"); }
+                        }
                     }
                     wk.reset();
                 }

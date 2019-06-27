@@ -191,6 +191,19 @@ public class TDHandler implements NRODListener
             catch (Exception e) { NRODLight.printThrowable(e, "TD"); }
         }
 
+        updateClients(updateMap);
+
+        RateMonitor.getInstance().onTDMessage((System.currentTimeMillis() -
+                        Long.parseLong(headers.get("timestamp"))) / 1000d,timestamps.stream().mapToLong(e ->
+                        System.currentTimeMillis() - e).average().orElse(0) / 1000d, updateCount);
+
+        lastMessageTime = System.currentTimeMillis();
+        StompConnectionHandler.lastMessageTimeGeneral = lastMessageTime;
+        StompConnectionHandler.ack(headers.get("ack"));
+    }
+
+    public static void updateClients(Map<String, String> updateMap)
+    {
         DATA_MAP.putAll(updateMap);
         if (NRODLight.webSocket != null)
         {
@@ -221,20 +234,13 @@ public class TDHandler implements NRODListener
                     .filter(Objects::nonNull)
                     .filter(WebSocket::isOpen)
                     .filter(c -> c instanceof EASMWebSocketImpl)
-                .forEach(ws ->
-            {
-                try { ((EASMWebSocketImpl)ws).send(messages); }
-                catch (WebsocketNotConnectedException ignored) {}
-            });
+                    .forEach(ws ->
+                    {
+                        try { ((EASMWebSocketImpl)ws).send(messages); }
+                        catch (WebsocketNotConnectedException ignored) {}
+                    });
         }
         saveTDData(updateMap);
-        RateMonitor.getInstance().onTDMessage((System.currentTimeMillis() - Long.parseLong(headers.get("timestamp")))/1000d,
-                                              timestamps.stream().mapToLong(e -> System.currentTimeMillis() - e).average().orElse(0)/1000d,
-                                              updateCount);
-
-        lastMessageTime = System.currentTimeMillis();
-        StompConnectionHandler.lastMessageTimeGeneral = lastMessageTime;
-        StompConnectionHandler.ack(headers.get("ack"));
     }
 
     private static String zfill(String s, int len)
