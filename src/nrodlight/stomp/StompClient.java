@@ -81,6 +81,12 @@ public class StompClient extends Stomp implements MessageReceiver
         connected = false;
     }
 
+    public void awaitClose() throws InterruptedException
+    {
+        if (!connected && Thread.currentThread() != listener)
+            listener.join();
+    }
+
     public void ack(String id/*, String subscriptionID*/)
     {
         try

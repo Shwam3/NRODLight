@@ -85,7 +85,12 @@ public class StompConnectionHandler
     public static void disconnect()
     {
         if (client != null && isConnected() && !isClosed())
+        {
             client.disconnect();
+
+            try { client.awaitClose(); }
+            catch (InterruptedException ignored) {}
+        }
 
         subscribedTRUST = false;
         subscribedVSTP  = false;
