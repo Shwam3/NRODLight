@@ -154,8 +154,11 @@ public class NRODLight
                     final WatchKey wk = watchService.take();
                     for (WatchEvent<?> event : wk.pollEvents())
                     {
-                        if (event.kind() == StandardWatchEventKinds.ENTRY_MODIFY && configPath.equals(event.context()))
+                        if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE ||
+                                event.kind() == StandardWatchEventKinds.ENTRY_MODIFY &&
+                                event.context() instanceof Path && configPath.endsWith((Path) event.context()))
                         {
+                            printOut("[Config] Reloading config");
                             reloadConfig();
                         }
                         else if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE ||
@@ -397,21 +400,21 @@ public class NRODLight
         {
             String configContents = new String(Files.readAllBytes(new File(EASM_STORAGE_DIR, "config.json").toPath()));
 
-            JSONObject newConfig = new JSONObject(configContents);
+            JSONObject oldConfig = config;
+            config = new JSONObject(configContents);
 
-            if (config != null && config.has("WSPort") && newConfig.has("WSPort")
-                    && config.optInt("WSPort") != newConfig.optInt("WSPort"))
+            if (oldConfig != null && oldConfig.has("WSPort") && config.has("WSPort")
+                    && oldConfig.optInt("WSPort") != config.optInt("WSPort"))
             {
                 try { webSocket.stop(0); }
                 catch (InterruptedException ignored) {}
 
                 ensureServerOpen();
             }
-            config = newConfig;
         }
         catch (IOException | JSONException e)
         {
-            NRODLight.printThrowable(e, "ConfigLoad");
+            NRODLight.printThrowable(e, "Config");
         }
     }
 }
