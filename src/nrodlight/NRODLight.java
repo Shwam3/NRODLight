@@ -80,15 +80,16 @@ public class NRODLight
         try
         {
             logStream = new PrintStream(new FileOutputStream(logFile, logFile.length() > 0), true);
-            System.setOut(logStream);
-            System.setErr(logStream);
+            System.setOut(new DoublePrintStream(System.out, logStream));
+            System.setErr(new DoublePrintStream(System.err, logStream));
         }
         catch (FileNotFoundException e) { printErr("Could not create log file"); printThrowable(e, "Startup"); }
 
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> printThrowable(e, String.format("[%s-%s]", t.getName(), t.getId())));
-        printOut("[Main] Starting... (v" + VERSION + ")");
+        printOut("[Startup] Starting... (v" + VERSION + ")");
         RateMonitor.getInstance(); // Initialises RateMonitor
 
+        printOut("[Startup] Loading config");
         reloadConfig();
         try { DBHandler.getConnection(); }
         catch (SQLException ex) { printThrowable(ex, "Startup"); }
@@ -118,7 +119,6 @@ public class NRODLight
         {
             EASMWebSocket.updateDelayData();
         }
-        catch (SQLException sqlex) { printThrowable(sqlex, "Startup-Delays"); }
         catch (Exception e) { printThrowable(e, "Startup-Delays"); }
 
         Runtime.getRuntime().addShutdownHook(new Thread(() ->
@@ -129,7 +129,7 @@ public class NRODLight
             if (webSocket != null)
             {
                 try { webSocket.stop(1000); }
-                catch (Throwable t) {}
+                catch (Throwable ignored) {}
             }
 
             StompConnectionHandler.disconnect();
@@ -331,9 +331,6 @@ public class NRODLight
         Date logDate = new Date();
         if (!lastLogDate.equals(sdfDate.format(logDate)))
         {
-            logStream.flush();
-            logStream.close();
-
             lastLogDate = sdfDate.format(logDate);
 
             logFile = new File(EASM_STORAGE_DIR, "Logs" + File.separator + "NRODLight" + File.separator + lastLogDate.replace("/", "-") + ".log");
@@ -344,8 +341,8 @@ public class NRODLight
                 logFile.createNewFile();
                 logStream = new PrintStream(new FileOutputStream(logFile, true));
 
-                System.setOut(logStream);
-                System.setErr(logStream);
+                ((DoublePrintStream) System.out).newFOut(logStream).flush();
+                ((DoublePrintStream) System.err).newFOut(logStream).close();
             }
             catch (IOException e) { printErr("Could not create log file"); printThrowable(e, "Logging"); }
         }
