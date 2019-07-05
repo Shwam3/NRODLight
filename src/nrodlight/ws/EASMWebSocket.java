@@ -269,11 +269,11 @@ public class EASMWebSocket extends WebSocketServer
                 "a.start_timestamp,a.current_delay,a.next_expected_update,a.off_route,a.finished,a.last_update," +
                 "GROUP_CONCAT(DISTINCT s.td ORDER BY s.td SEPARATOR ',') AS tds,TRIM(SUBSTRING_INDEX(GROUP_CONCAT(" +
                 "COALESCE(c.tps_name,l.tiploc) ORDER BY l.loc_index SEPARATOR ','),',',1)) AS loc_origin,TRIM(" +
-                "SUBSTRING_INDEX(GROUP_CONCAT(COALESCE(c.tps_name,l.tiploc) ORDER BY l.loc_index SEPARATOR ','),',',-1)) " +
-                "AS loc_dest,SUBSTRING_INDEX(GROUP_CONCAT(l.scheduled_departure ORDER BY l.loc_index SEPARATOR ','),','," +
-                "1) AS origin_dep FROM activations a INNER JOIN schedule_locations l ON a.schedule_uid=l.schedule_uid " +
-                "AND a.stp_indicator=l.stp_indicator AND a.schedule_date_from=l.date_from AND " +
-                "a.schedule_source=l.schedule_source LEFT JOIN corpus c ON l.tiploc=c.tiploc LEFT JOIN smart s ON " +
+                "SUBSTRING_INDEX(GROUP_CONCAT(COALESCE(c.tps_name,l.tiploc) ORDER BY l.loc_index DESC SEPARATOR ',')," +
+                "',',1)) AS loc_dest,SUBSTRING_INDEX(GROUP_CONCAT(l.scheduled_departure ORDER BY l.loc_index SEPARATOR " +
+                "','),',',1) AS origin_dep FROM activations a INNER JOIN schedule_locations l ON " +
+                "a.schedule_uid=l.schedule_uid AND a.stp_indicator=l.stp_indicator AND a.schedule_date_from=l.date_from " +
+                "AND a.schedule_source=l.schedule_source LEFT JOIN corpus c ON l.tiploc=c.tiploc LEFT JOIN smart s ON " +
                 "c.stanox=s.stanox WHERE (a.last_update > (CAST(UNIX_TIMESTAMP(CURTIME(3)) AS INT) - 43200) * 1000) " +
                 "AND (a.finished=0 OR a.last_update > (CAST(UNIX_TIMESTAMP(CURTIME(3)) AS INT) - 2700) * 1000) AND " +
                 "a.cancelled=0 GROUP BY a.train_id HAVING tds IS NOT NULL");
