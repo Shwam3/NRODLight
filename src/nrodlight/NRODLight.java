@@ -55,8 +55,8 @@ public class NRODLight
 
     public static EASMWebSocket webSocket;
 
-    private static PrintStream stdOut = System.out;
-    private static PrintStream stdErr = System.err;
+    private static final PrintStream stdOut = System.out;
+    private static final PrintStream stdErr = System.err;
 
     static
     {
@@ -96,21 +96,25 @@ public class NRODLight
 
         try
         {
-            File TDDataDir = new File(NRODLight.EASM_STORAGE_DIR, "TDData");
-            Arrays.stream(TDDataDir.listFiles())
-                    .filter(File::isFile)
-                    .filter(File::canRead)
-                    .filter(f -> f.getName().endsWith(".td"))
-                    .forEach(f ->
-                    {
-                        try
+            File[] TDDataFiles = new File(NRODLight.EASM_STORAGE_DIR, "TDData").listFiles();
+            if (TDDataFiles != null)
+            {
+                Arrays.stream(TDDataFiles)
+                        .filter(File::isFile)
+                        .filter(File::canRead)
+                        .filter(f -> f.getName().endsWith(".td"))
+                        .forEach(f ->
                         {
-                            JSONObject data = new JSONObject(new String(Files.readAllBytes(f.toPath())));
-                            data.keys().forEachRemaining(k -> TDHandler.DATA_MAP.putIfAbsent(k, data.getString(k)));
-                        }
-                        catch (IOException e) { NRODLight.printErr("[TD-Startup] Cannot read " + f.getName()); }
-                        catch (JSONException e) { NRODLight.printErr("[TD-Startup] Malformed JSON in " + f.getName()); }
-                    });
+                            try {
+                                JSONObject data = new JSONObject(new String(Files.readAllBytes(f.toPath())));
+                                data.keys().forEachRemaining(k -> TDHandler.DATA_MAP.putIfAbsent(k, data.getString(k)));
+                            } catch (IOException e) {
+                                NRODLight.printErr("[TD-Startup] Cannot read " + f.getName());
+                            } catch (JSONException e) {
+                                NRODLight.printErr("[TD-Startup] Malformed JSON in " + f.getName());
+                            }
+                        });
+            }
             printOut("[Startup] Finished reading TD data");
         }
         catch (Exception e) { NRODLight.printThrowable(e, "TD-Startup"); }

@@ -220,7 +220,7 @@ public class EASMWebSocket extends WebSocketServer
                 ip = conn instanceof EASMWebSocketImpl ? ((EASMWebSocketImpl)conn).getIP() :
                     conn.getRemoteSocketAddress().getAddress().getHostAddress();
             }
-            catch (Exception e) {}
+            catch (Exception ignored) {}
 
             printWebSocket("Error (" + ip + "):", true);
             conn.close(CloseFrame.NORMAL, ex.getMessage());

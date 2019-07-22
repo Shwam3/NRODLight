@@ -24,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class TDHandler implements NRODListener
 {
-    private long lastMessageTime = 0;
+    private long lastMessageTime;
     private static String lastLogDate = "";
 
     private static NRODListener instance = null;
@@ -77,8 +77,7 @@ public class TDHandler implements NRODListener
                                 indvMsg.getString("descr"),
                                 indvMsg.getString("area_id") + indvMsg.getString("from").replace("*", "-"),
                                 indvMsg.getString("area_id") + indvMsg.getString("to").replace("*", "-")
-                            ),
-                            false, time);
+                            ), time);
                         updateCount++;
                         break;
                     }
@@ -92,8 +91,7 @@ public class TDHandler implements NRODListener
                         printTD(String.format("Cancel %s from %s",
                                 indvMsg.getString("descr"),
                                 indvMsg.getString("area_id") + indvMsg.getString("from").replace("*", "-")
-                            ),
-                            false, time);
+                            ), time);
                         updateCount++;
                         break;
                     }
@@ -107,8 +105,7 @@ public class TDHandler implements NRODListener
                         printTD(String.format("Interpose %s to %s",
                                 indvMsg.getString("descr"),
                                 indvMsg.getString("area_id") + indvMsg.getString("to").replace("*", "-")
-                            ),
-                            false, time);
+                            ), time);
                         updateCount++;
                         break;
                     }
@@ -122,8 +119,7 @@ public class TDHandler implements NRODListener
                         printTD(String.format("Heartbeat from %s at time %s",
                                 indvMsg.getString("area_id"),
                                 indvMsg.getString("report_time")
-                            ),
-                            false, time);
+                            ), time);
                         updateCount++;
                         break;
                     }
@@ -145,8 +141,7 @@ public class TDHandler implements NRODListener
                                         address,
                                         DATA_MAP.getOrDefault(address, "0"),
                                         dataBit
-                                    ),
-                                    false, time);
+                                    ), time);
                                 updateCount++;
                             }
                             updateMap.put(address, dataBit);
@@ -178,8 +173,7 @@ public class TDHandler implements NRODListener
                                             id,
                                             DATA_MAP.getOrDefault(id, "0"),
                                             dat
-                                        ),
-                                        false, time);
+                                        ), time);
                                     updateCount++;
                                 }
                             }
@@ -322,14 +316,11 @@ public class TDHandler implements NRODListener
     public long getTimeout() { return System.currentTimeMillis() - lastMessageTime; }
     public long getTimeoutThreshold() { return 30000; }
 
-    private void printTD(String message, boolean toErr, long timestamp)
+    private void printTD(String message, long timestamp)
     {
         if (NRODLight.verbose)
         {
-            if (toErr)
-                NRODLight.printErr("[TD] [" + NRODLight.sdfDateTime.format(new Date(timestamp)) + "] " + message);
-            else
-                NRODLight.printOut("[TD] [" + NRODLight.sdfDateTime.format(new Date(timestamp)) + "] " + message);
+            NRODLight.printOut("[TD] [" + NRODLight.sdfDateTime.format(new Date(timestamp)) + "] " + message);
         }
 
         String newDate = NRODLight.sdfDate.format(new Date());

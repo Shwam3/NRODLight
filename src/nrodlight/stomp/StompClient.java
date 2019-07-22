@@ -91,16 +91,7 @@ public class StompClient extends Stomp implements MessageReceiver
     {
         try
         {
-            StringBuilder message = new StringBuilder("ACK\n");
-
-            //message.append("subscription:").append(clientID).append("-").append(subscriptionID).append("\n"); // 1.0,1.1
-            //message.append("message-id:").append(id.replace(":", "\\c")).append("\n");                        // 1.0,1.1
-            message.append("id:").append(id.replace("\\c", ":")).append("\n");                                  // 1.2
-
-            message.append("\n");
-            message.append("\000");
-
-            output.write(message.toString().getBytes(Command.ENCODING));
+            output.write(("ACK\n" + "id:" + id.replace("\\c", ":") + "\n\n\000").getBytes(Command.ENCODING));
         }
         catch (IOException e)
         {

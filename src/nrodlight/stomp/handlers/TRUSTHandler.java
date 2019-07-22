@@ -31,7 +31,7 @@ public class TRUSTHandler implements NRODListener
     private static PrintWriter logStream;
     private static File        logFile;
     private static String      lastLogDate = "";
-    private        long        lastMessageTime = 0;
+    private        long        lastMessageTime;
     private static final SimpleDateFormat cifTime = new SimpleDateFormat("HHmmss");
 
     private static NRODListener instance = null;
@@ -83,17 +83,6 @@ public class TRUSTHandler implements NRODListener
                     "last_update=?, last_update_tiploc=COALESCE((SELECT tiploc FROM corpus WHERE stanox=? LIMIT 1), ?), " +
                     "next_expected_update=?, next_expected_tiploc=COALESCE((SELECT tiploc FROM corpus WHERE stanox=? " +
                     "LIMIT 1), ?), finished=?, off_route=0 WHERE train_id=? AND (last_update<=? OR 'AUTOMATIC'=?)");
-            //PreparedStatement ps0003_current_loc = conn.prepareStatement("SELECT l.tiploc,scheduled_arrival," +
-            //        "scheduled_departure,scheduled_pass FROM schedule_locations l INNER JOIN activations a ON " +
-            //        "l.schedule_uid=a.schedule_uid AND a.schedule_date_from=l.date_from AND " +
-            //        "l.stp_indicator=a.stp_indicator AND l.schedule_source=a.schedule_source INNER JOIN corpus c ON " +
-            //        "l.tiploc=c.tiploc WHERE AND a.train_id=? AND c.stanox=? ORDER BY loc_index ASC");
-            //PreparedStatement ps0003_get_dep = conn.prepareStatement("SELECT l.tiploc,scheduled_arrival," +
-            //        "scheduled_departure,scheduled_pass FROM schedule_locations l INNER JOIN activations a ON " +
-            //        "l.schedule_uid=a.schedule_uid AND a.schedule_date_from=l.date_from AND " +
-            //        "l.stp_indicator=a.stp_indicator AND l.schedule_source=a.schedule_source INNER JOIN corpus c ON " +
-            //        "l.tiploc=c.tiploc INNER JOIN smart s ON c.stanox=s.stanox WHERE s.reports=1 AND a.train_id=? AND " +
-            //        "(scheduled_arrival=? OR scheduled_pass=?) ORDER BY loc_index ASC LIMIT 1");
             PreparedStatement ps0003_next_update_arr = conn.prepareStatement("SELECT l.tiploc,c.stanox," +
                     "scheduled_arrival,scheduled_departure,scheduled_pass FROM schedule_locations l INNER JOIN " +
                     "activations a ON l.schedule_uid=a.schedule_uid AND a.schedule_date_from=l.date_from AND " +
@@ -285,13 +274,6 @@ public class TRUSTHandler implements NRODListener
                                     try (ResultSet rs = ps0003_next_update_arr.executeQuery()) {
                                         if (rs.next())
                                         {
-                                            //NRODLight.printOut(String.format("[Debug] tid %s, stanox %s, tiploc %s, " +
-                                            //                "stanox %s, arr '%s', dep '%s', pass '%s'",
-                                            //        body.getString("train_id"), body.getString("loc_stanox"),
-                                            //        rs.getString(1), rs.getString(2),
-                                            //        rs.getString(3), rs.getString(4),
-                                            //        rs.getString(5)));
-
                                             next_expected_tiploc = rs.getString(1);
 
                                             if (body.getString("loc_stanox").equals(rs.getString(2)))
@@ -377,7 +359,7 @@ public class TRUSTHandler implements NRODListener
                 }
                 catch (Exception ex) { NRODLight.printThrowable(ex, "TRUST"); }
 
-                printTRUST(map.toString(), false);
+                printTRUST(map.toString());
             }
         }
         catch (SQLException e) { NRODLight.printThrowable(e, "TRUST"); }
@@ -393,13 +375,6 @@ public class TRUSTHandler implements NRODListener
         return timestamp - (TimeZone.getDefault().inDaylightTime(new Date(timestamp)) ? 3600000L : 0L);
     }
 
-    private static String cifTime(String timestamp, boolean fix)
-    {
-        if (fix)
-            return cifTime(fixTimestamp(Long.parseLong(timestamp)));
-        return cifTime(Long.parseLong(timestamp));
-    }
-
     private static String cifTime(long timestamp)
     {
         String s = cifTime.format(new Date(timestamp));
@@ -408,8 +383,6 @@ public class TRUSTHandler implements NRODListener
 
     private static long timeCif(String s, long refTimestamp)
     {
-        //NRODLight.printOut("[Debug] '" + s + "' '" + refTimestamp + "'");
-
         int hh = Integer.parseInt(s.substring(0, 2));
         int mm = Integer.parseInt(s.substring(2, 4));
         int ss = "H".equals(s.substring(4)) ? 30 : 0;
@@ -424,19 +397,16 @@ public class TRUSTHandler implements NRODListener
     public long getTimeout() { return System.currentTimeMillis() - lastMessageTime; }
     public long getTimeoutThreshold() { return 30000; }
 
-    private static synchronized void printTRUST(String message, boolean toErr)
+    private static synchronized void printTRUST(String message)
     {
-        printTRUST(message, toErr, System.currentTimeMillis());
+        printTRUST(message, System.currentTimeMillis());
     }
 
-    private static void printTRUST(String message, boolean toErr, long timestamp)
+    private static void printTRUST(String message, long timestamp)
     {
         if (NRODLight.verbose)
         {
-            if (toErr)
-                NRODLight.printErr("[TRUST] " + message);
-            else
-                NRODLight.printOut("[TRUST] " + message);
+            NRODLight.printOut("[TRUST] " + message);
         }
 
         String newDate = NRODLight.sdfDate.format(new Date());
@@ -457,6 +427,6 @@ public class TRUSTHandler implements NRODListener
             catch (IOException e) { NRODLight.printThrowable(e, "TRUST"); }
         }
 
-        logStream.println("[" + NRODLight.sdfDateTime.format(new Date(timestamp)) + "] " + (toErr ? "!!!> " : "") + message + (toErr ? " <!!!" : ""));
+        logStream.println("[" + NRODLight.sdfDateTime.format(new Date(timestamp)) + "] " + message);
     }
 }

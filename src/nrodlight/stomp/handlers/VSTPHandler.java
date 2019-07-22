@@ -24,7 +24,7 @@ public class VSTPHandler implements NRODListener
     private static PrintWriter logStream;
     private static File        logFile;
     private static String      lastLogDate = "";
-    private        long        lastMessageTime = 0;
+    private        long        lastMessageTime;
 
     private static NRODListener instance = null;
     private VSTPHandler()

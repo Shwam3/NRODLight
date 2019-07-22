@@ -21,7 +21,7 @@ public class StompConnectionHandler
     private static StompClient client;
 
     private static ScheduledExecutorService executor = null;
-    private static int    maxTimeoutWait = 300;
+    private static final int maxTimeoutWait = 300;
     private static int    timeoutWait = 10;
     private static int    wait = 0;
     public  static long   lastMessageTimeGeneral = System.currentTimeMillis();

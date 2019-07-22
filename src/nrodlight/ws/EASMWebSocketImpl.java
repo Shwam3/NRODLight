@@ -193,7 +193,10 @@ public class EASMWebSocketImpl extends WebSocketImpl
 
         JSONArray delaysDataSend = new JSONArray();
         StreamSupport.stream(delayData.getJSONArray("message").spliterator(), false)
-                .filter(t -> StreamSupport.stream(((JSONObject) t).getJSONArray("tds").spliterator(), false).anyMatch(o -> areas.contains(o)))
+                .filter(t -> StreamSupport.
+                        stream(((JSONObject) t).getJSONArray("tds").spliterator(), false)
+                        .anyMatch(o -> areas.contains(String.valueOf(o)))
+                )
                 .forEach(delaysDataSend::put);
 
         JSONObject content = new JSONObject();
