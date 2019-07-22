@@ -74,15 +74,15 @@ public class TRUSTHandler implements NRODListener
                     "AND loc_index=0");
             PreparedStatement ps0001 = conn.prepareStatement("INSERT INTO activations (train_id,train_id_current," +
                     "start_timestamp,schedule_uid,schedule_date_from,schedule_date_to,stp_indicator,schedule_source," +
-                    "creation_timestamp,next_expected_update,next_expected_tiploc,last_update) VALUES (?,?,?,?,?,?,?,?," +
-                    "?,?,?,?) ON DUPLICATE KEY UPDATE next_expected_update=?, next_expected_tiploc=?, start_timestamp=?, " +
-                    "last_update=?");
+                    "creation_timestamp,next_expected_update,next_expected_tiploc,last_update,activation_timestamp) " +
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE next_expected_update=?, " +
+                    "next_expected_tiploc=?, start_timestamp=?, last_update=?");
             PreparedStatement ps0002_0005 = conn.prepareStatement("UPDATE activations SET cancelled=?, last_update=? " +
                     "WHERE train_id=?");
             PreparedStatement ps0003_update = conn.prepareStatement("UPDATE activations SET current_delay=?, " +
-                    "last_update=?, last_update_tiploc=COALESCE((SELECT tiploc FROM corpus WHERE stanox=? LIMIT 1), ?), " +
-                    "next_expected_update=?, next_expected_tiploc=COALESCE((SELECT tiploc FROM corpus WHERE stanox=? " +
-                    "LIMIT 1), ?), finished=?, off_route=0 WHERE train_id=? AND (last_update<=? OR 'AUTOMATIC'=?)");
+                    "last_update=?, last_update_tiploc=COALESCE((SELECT tiploc FROM corpus WHERE stanox=? AND ''!=? LIMIT 1), ?), " +
+                    "next_expected_update=?, next_expected_tiploc=COALESCE((SELECT tiploc FROM corpus WHERE stanox=?" +
+                    "AND ''!=? LIMIT 1), ?), finished=?, off_route=0 WHERE train_id=? AND (last_update<=? OR 'AUTOMATIC'=?)");
             PreparedStatement ps0003_next_update_arr = conn.prepareStatement("SELECT l.tiploc,c.stanox," +
                     "scheduled_arrival,scheduled_departure,scheduled_pass FROM schedule_locations l INNER JOIN " +
                     "activations a ON l.schedule_uid=a.schedule_uid AND a.schedule_date_from=l.date_from AND " +
@@ -195,11 +195,12 @@ public class TRUSTHandler implements NRODListener
                             ps0001.setLong(10, origin_dep_timestamp);
                             ps0001.setString(11, scheduled_departure_tiploc);
                             ps0001.setLong(12, creation_timestamp);
+                            ps0001.setLong(13, creation_timestamp);
 
-                            ps0001.setLong(13, origin_dep_timestamp);
-                            ps0001.setString(14, scheduled_departure_tiploc);
-                            ps0001.setLong(15, origin_dep_timestamp);
-                            ps0001.setLong(16, creation_timestamp);
+                            ps0001.setLong(14, origin_dep_timestamp);
+                            ps0001.setString(15, scheduled_departure_tiploc);
+                            ps0001.setLong(16, origin_dep_timestamp);
+                            ps0001.setLong(17, creation_timestamp);
 
                             ps0001.execute();
                             break;
@@ -309,13 +310,15 @@ public class TRUSTHandler implements NRODListener
                                     ps0003_update.setLong(2, at);
                                     ps0003_update.setString(3, body.getString("loc_stanox"));
                                     ps0003_update.setString(4, body.getString("loc_stanox"));
-                                    ps0003_update.setLong(5, next_expected_update == -2 ? -1 : next_expected_update);
-                                    ps0003_update.setString(6, next_expected_tiploc);
+                                    ps0003_update.setString(5, body.getString("loc_stanox"));
+                                    ps0003_update.setLong(6, next_expected_update == -2 ? -1 : next_expected_update);
                                     ps0003_update.setString(7, next_expected_tiploc);
-                                    ps0003_update.setBoolean(8, "true".equals(body.getString("train_terminated")));
-                                    ps0003_update.setString(9, body.getString("train_id"));
-                                    ps0003_update.setLong(10, at);
-                                    ps0003_update.setString(11, body.getString("event_source"));
+                                    ps0003_update.setString(8, next_expected_tiploc);
+                                    ps0003_update.setString(9, next_expected_tiploc);
+                                    ps0003_update.setBoolean(10, "true".equals(body.getString("train_terminated")));
+                                    ps0003_update.setString(11, body.getString("train_id"));
+                                    ps0003_update.setLong(12, at);
+                                    ps0003_update.setString(13, body.getString("event_source"));
                                     ps0003_update.execute();
                                 }
                             }
