@@ -91,7 +91,7 @@ public class StompClient extends Stomp implements MessageReceiver
     {
         try
         {
-            output.write(("ACK\n" + "id:" + id.replace("\\c", ":") + "\n\n\000").getBytes(Command.ENCODING));
+            output.write(("ACK\nid:" + id.replace("\\c", ":") + "\n\n\000").getBytes(Command.ENCODING));
         }
         catch (IOException e)
         {
