@@ -25,7 +25,7 @@ public class EASMDraft_6455 extends Draft_6455
     {
         HandshakeBuilder hb = super.postProcessHandshakeResponseAsServer(request, response);
 
-        hb.put("Server", "SignalMaps Java-WebSocket");
+        hb.put("Server", "SignalMaps WebSocket");
         hb.put("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
 
         return hb;

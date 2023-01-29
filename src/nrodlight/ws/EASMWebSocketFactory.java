@@ -1,5 +1,6 @@
 package nrodlight.ws;
 
+import nrodlight.SigmapsThreadFactory;
 import org.java_websocket.SSLSocketChannel2;
 import org.java_websocket.WebSocketAdapter;
 import org.java_websocket.WebSocketImpl;
@@ -19,13 +20,19 @@ import java.util.concurrent.Executors;
 
 public class EASMWebSocketFactory extends DefaultSSLWebSocketServerFactory
 {
-    private final SSLParameters sslParameters;
+    private SSLParameters sslParameters;
 
     public EASMWebSocketFactory(SSLContext sslContext, SSLParameters sslParameters)
     {
-        super(sslContext, Executors.newSingleThreadExecutor());
+        super(sslContext, Executors.newSingleThreadExecutor(new SigmapsThreadFactory("SocketFactoryExecutor")));
 
         this.sslParameters = Objects.requireNonNull(sslParameters);
+    }
+
+    public void updateSSLDetails(SSLContext sslContext, SSLParameters sslParameters)
+    {
+        this.sslcontext = sslContext;
+        this.sslParameters = sslParameters;
     }
 
     @Override

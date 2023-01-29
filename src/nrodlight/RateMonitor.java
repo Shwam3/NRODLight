@@ -1,120 +1,92 @@
 package nrodlight;
 
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.Executors;
+import nrodlight.db.DBHandler;
+import nrodlight.db.Queries;
+import org.json.JSONObject;
+
+import java.sql.PreparedStatement;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class RateMonitor
 {
-    private final Map<String, AtomicInteger> rateMap = new HashMap<>();
-    private final List<Double> stompDelays = new ArrayList<>();
-    private final List<Double> descrDelays = new ArrayList<>();
-    private final AtomicInteger wsPeakConns = new AtomicInteger();
-    private static PrintWriter logStream;
-    private static File        logFile;
-    private static String      lastLogDate = "";
-    private final String[]     topics = {"StompMessages", "StompDelay", "TDDelay", "TDMessages", "WSConnections", "TRUSTMessages", "VSTPMessages"};
+    private final Map<String, AtomicLong> countMap = new HashMap<>();
+    private final Map<String, List<Double>> averageMap = new HashMap<>();
+    private final Map<String, JSONObject> stringMap = new HashMap<>();
+    private final String[] columns = {"StompMessages", "TDStompDelay", "TDEventDelay", "TDMessages", "WSConnections",
+            "TRUSTStompDelay", "TRUSTEventDelay", "TRUSTMessages", "VSTPStompDelay", "VSTPEventDelay", "VSTPMessages",
+            "TRUSTActivations", "TRUSTCancellations", "TRUSTMovements", "TRUSTReinstatements", "TRUSTChOrigins",
+            "TRUSTChIdents", "TRUSTChLocations", "InferredActivations", "TDHeartbeats", "VSTPCreates", "VSTPDeletes",
+            "TDMessagesIndividual"};
+    private final boolean[] isCount = {true, false, false, true, true, false, false, true, false, false, true, true,
+            true, true, true, true, true, true, true, true, true, true, false};
+    private final boolean[] isString = {false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, true};
+
+    private final String[] countCols = {"StompMessages", "TDMessages", "WSConnections", "TRUSTMessages", "VSTPMessages",
+            "TRUSTActivations", "TRUSTCancellations", "TRUSTMovements", "TRUSTReinstatements", "TRUSTChOrigins",
+            "TRUSTChIdents", "TRUSTChLocations", "InferredActivations", "TDHeartbeats", "VSTPCreates", "VSTPDeletes"};
+    private final String[] averageCols = {"TDStompDelay", "TDEventDelay", "TRUSTStompDelay", "TRUSTEventDelay",
+            "VSTPStompDelay", "VSTPEventDelay"};
+    private final String[] stringCols = {"TDMessagesIndividual"};
 
     private static RateMonitor instance = null;
     private RateMonitor()
     {
-        Date logDate = new Date();
-        logFile = new File(NRODLight.EASM_STORAGE_DIR, "Logs" + File.separator + "RateMonitor" + File.separator + NRODLight.sdfDate.format(logDate).replace("/", "-") + ".csv");
-        boolean fileExisted = logFile.exists();
-        logFile.getParentFile().mkdirs();
-        lastLogDate = NRODLight.sdfDate.format(logDate);
-
-        try { logStream = new PrintWriter(new BufferedWriter(new FileWriter(logFile, true)), true); }
-        catch (IOException e) { NRODLight.printThrowable(e, "RateMonitor"); }
-
-        if (!fileExisted)
+        for (int i = 0; i < columns.length; i++)
         {
-            logStream.print("time,");
-            for (int i = 0; i < topics.length; i++)
-                logStream.print(topics[i] + (i >= topics.length - 1 ? "" : ","));
-            logStream.println();
+            if (isCount[i])
+                countMap.put(columns[i], new AtomicLong());
+            else if (isString[i])
+                stringMap.put(columns[i], new JSONObject());
+            else
+                averageMap.put(columns[i], new ArrayList<>());
         }
 
-        for (String topic : topics)
-            rateMap.put(topic, new AtomicInteger(0));
-
-        long currTim = System.currentTimeMillis();
+        long currTime = System.currentTimeMillis();
         Calendar wait = Calendar.getInstance();
-        wait.setTimeInMillis(currTim);
+        wait.setTimeInMillis(currTime);
         wait.set(Calendar.MILLISECOND, 0);
         wait.set(Calendar.SECOND, 0);
         wait.add(Calendar.MINUTE, 1);
 
-        Executors.newSingleThreadScheduledExecutor().scheduleAtFixedRate(() ->
+        NRODLight.getExecutor().scheduleAtFixedRate(() ->
         {
             try
             {
-                Date logDateNew = new Date();
-                String logDateNewStr = NRODLight.sdfDate.format(logDateNew);
-                if (!NRODLight.sdfDate.format(logDateNew).equals(lastLogDate))
+                try (PreparedStatement ps = DBHandler.getConnection().prepareStatement(Queries.RATE_MONITOR))
                 {
-                    logStream.close();
+                    ps.setLong(1, (System.currentTimeMillis() / 60000L) * 60L);
 
-                    logFile = new File(NRODLight.EASM_STORAGE_DIR, "Logs" + File.separator + "RateMonitor" + File.separator + logDateNewStr.replace("/", "-") + ".csv");
-                    logFile.getParentFile().mkdirs();
-                    lastLogDate = logDateNewStr;
+                    for (int i = 0; i < columns.length; i++)
+                    {
+                        if (isCount[i])
+                        {
+                            if (i == 4) // WSConnections
+                                ps.setInt(2 + i, (int) countMap.get(columns[i]).getAndSet(NRODLight.webSocket != null ? NRODLight.webSocket.getConnectionCount() : 0));
+                            else
+                                ps.setInt(2 + i, (int) countMap.get(columns[i]).getAndSet(0));
+                        }
+                        else if (isString[i])
+                        {
+                            String value = stringMap.get(columns[i]).toString();
+                            stringMap.get(columns[i]).clear();
+                            ps.setString(2 + i, value);
+                        }
+                        else
+                        {
+                            List<Double> values = new ArrayList<>(averageMap.get(columns[i]));
+                            averageMap.get(columns[i]).clear();
+                            ps.setInt(2 + i, (int) Math.floor(values.stream().mapToLong(v -> (long) (v * 1000)).average().orElse(0)));
+                        }
+                    }
 
-                    try { logStream = new PrintWriter(new BufferedWriter(new FileWriter(logFile, true)), true); }
-                    catch (IOException e) { NRODLight.printThrowable(e, "RateMonitor"); }
-
-                    logStream.print("time,");
-                    for (int i = 0; i < topics.length; i++)
-                        logStream.print(topics[i] + (i >= topics.length - 1 ? "" : ","));
-                    logStream.println();
+                    ps.executeUpdate();
                 }
-
-                logStream.print(NRODLight.sdfTime.format(logDateNew) + ",");
-                for (int i = 0; i < topics.length; i++)
-                {
-                    String topic = topics[i];
-                    if ("StompDelay".equals(topic))
-                    {
-                        List<Double> delays = new ArrayList<>(stompDelays);
-                        stompDelays.clear();
-                        double avg = delays.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-                        logStream.print(String.format("%.3f", avg));
-                    }
-                    else if ("TDDelay".equals(topic))
-                    {
-                        List<Double> delays = new ArrayList<>(descrDelays);
-                        descrDelays.clear();
-                        double avg = delays.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-                        logStream.print(String.format("%.3f", avg));
-                    }
-                    else if ("WSConnections".equals(topic))
-                    {
-                        int count = NRODLight.webSocket != null ? NRODLight.webSocket.getConnections().size() : 0;
-                        logStream.print(wsPeakConns.getAndSet(count));
-                    }
-                    else
-                    {
-                        long count = rateMap.get(topic).getAndSet(0);
-                        logStream.print(count);
-                    }
-
-                    if (i < topics.length-1)
-                        logStream.print(',');
-                }
-                logStream.println();
             }
-            catch(Exception e) { NRODLight.printThrowable(e, "RateMonitor"); }
-        }, wait.getTimeInMillis() - currTim, 1000 * 60, TimeUnit.MILLISECONDS);
+            catch(Exception e) { NRODLight.printThrowable(e, "RateMonitor");}
+        }, wait.getTimeInMillis() - currTime, 1000 * 60, TimeUnit.MILLISECONDS);
     }
 
     public static RateMonitor getInstance()
@@ -125,26 +97,51 @@ public class RateMonitor
         return instance;
     }
 
-    public void onTDMessage(Double delayStomp, Double delayTD, int msgCount)
-    {
-        stompDelays.add(delayStomp);
-        descrDelays.add(delayTD);
-        rateMap.get("StompMessages").incrementAndGet();
-        rateMap.get("TDMessages").addAndGet(msgCount);
-    }
-
     public void onWSOpen()
     {
-        wsPeakConns.incrementAndGet();
+        countMap.get("WSConnections").incrementAndGet();
     }
 
-    public void onVSTPMessage()
+    public void onTDMessage(Double delayStomp, Double delayEvent, long msgCount, long heartbeats,
+                            Map<String, Long> counts)
     {
-        rateMap.get("VSTPMessages").incrementAndGet();
+        averageMap.get("TDStompDelay").add(delayStomp);
+        averageMap.get("TDEventDelay").add(delayEvent);
+        countMap.get("StompMessages").incrementAndGet();
+        countMap.get("TDMessages").addAndGet(msgCount);
+        countMap.get("TDHeartbeats").addAndGet(heartbeats);
+        final JSONObject a = stringMap.get("TDMessagesIndividual");
+        counts.forEach((k, v) -> {
+            if (a.has(k))
+                ((AtomicLong) a.get(k)).addAndGet(v);
+            else
+                a.put(k, new AtomicLong(v));
+        });
     }
 
-    public void onTRUSTMessage(int msgCount)
+    public void onVSTPMessage(Double delayStomp, Double delayEvent, boolean isDelete)
     {
-        rateMap.get("TRUSTMessages").addAndGet(msgCount);
+        averageMap.get("VSTPStompDelay").add(delayStomp);
+        averageMap.get("VSTPEventDelay").add(delayEvent);
+        countMap.get("StompMessages").incrementAndGet();
+        countMap.get("VSTPMessages").incrementAndGet();
+        countMap.get(isDelete ? "VSTPDeletes" : "VSTPCreates").incrementAndGet();
+    }
+
+    public void onTRUSTMessage(Double delayStomp, Double delayEvent, long acts, long cans, long moves,
+                               long reins, long coo, long coi, long col, long inf)
+    {
+        averageMap.get("TRUSTStompDelay").add(delayStomp);
+        averageMap.get("TRUSTEventDelay").add(delayEvent);
+        countMap.get("StompMessages").incrementAndGet();
+        countMap.get("TRUSTMessages").addAndGet(acts + cans + moves + reins + coo + coi + col);
+        countMap.get("TRUSTActivations").addAndGet(acts);
+        countMap.get("TRUSTCancellations").addAndGet(cans);
+        countMap.get("TRUSTMovements").addAndGet(moves);
+        countMap.get("TRUSTReinstatements").addAndGet(reins);
+        countMap.get("TRUSTChOrigins").addAndGet(coo);
+        countMap.get("TRUSTChIdents").addAndGet(coi);
+        countMap.get("TRUSTChLocations").addAndGet(col);
+        countMap.get("InferredActivations").addAndGet(inf);
     }
 }

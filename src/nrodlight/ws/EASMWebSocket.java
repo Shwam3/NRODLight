@@ -3,6 +3,7 @@ package nrodlight.ws;
 import nrodlight.NRODLight;
 import nrodlight.RateMonitor;
 import nrodlight.db.DBHandler;
+import nrodlight.db.Queries;
 import org.java_websocket.WebSocket;
 import org.java_websocket.framing.CloseFrame;
 import org.java_websocket.handshake.ClientHandshake;
@@ -14,19 +15,12 @@ import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLParameters;
-import javax.xml.bind.DatatypeConverter;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
-import java.security.KeyFactory;
-import java.security.KeyManagementException;
-import java.security.KeyStore;
-import java.security.KeyStoreException;
-import java.security.NoSuchAlgorithmException;
-import java.security.PrivateKey;
-import java.security.UnrecoverableKeyException;
+import java.security.*;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
@@ -37,20 +31,17 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Date;
-import java.util.List;
-import java.util.concurrent.Executors;
+import java.util.*;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 public class EASMWebSocket extends WebSocketServer
 {
-    private static final AtomicBoolean serverClosed = new AtomicBoolean(false);
+    private final AtomicBoolean serverClosed = new AtomicBoolean(false);
     private static JSONObject delayData = null;
+    private ScheduledFuture<?> certExpirationTask;
 
     public EASMWebSocket()
     {
@@ -58,11 +49,24 @@ public class EASMWebSocket extends WebSocketServer
                 Collections.singletonList(new EASMDraft_6455()));
         super.setReuseAddr(true);
 
+        reloadSSLContext(true);
+    }
+
+    private void reloadSSLContext0()
+    {
+        reloadSSLContext(false);
+    }
+
+    private void reloadSSLContext(boolean isFirst)
+    {
+        if (certExpirationTask != null)
+            certExpirationTask.cancel(false);
+
         Pair<SSLContext, Date> sslData = getSSLContextFromLetsEncrypt();
         SSLContext sslContext;
         if (sslData != null)
         {
-            sslContext = sslData.t;
+            sslContext = sslData.getLeft();
             List<String> ciphers = Arrays.asList(
                     "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
                     "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
@@ -72,33 +76,34 @@ public class EASMWebSocket extends WebSocketServer
                     "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384",
                     "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
                     "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
-                );
+            );
             List<String> protocols = Arrays.asList("TLSv1.2", "TLSv1.3");
 
             SSLEngine engine = sslContext.createSSLEngine();
 
-            List<String> ciphersAvailable = Arrays.asList(engine.getEnabledCipherSuites());
-            ciphers = ciphers.stream().filter(ciphersAvailable::contains).collect(Collectors.toList());
+            String[] ciphersAvailable = ciphers.stream().filter(Arrays.asList(engine.getEnabledCipherSuites())::contains).toArray(String[]::new);
+            String[] protocolsAvailable = protocols.stream().filter(Arrays.asList(engine.getEnabledProtocols())::contains).toArray(String[]::new);
 
-            List<String> protocolsAvailable = Arrays.asList(engine.getEnabledProtocols());
-            protocols = protocols.stream().filter(protocolsAvailable::contains).collect(Collectors.toList());
-
-            SSLParameters sslParameters = new SSLParameters(ciphers.toArray(new String[0]), protocols.toArray(new String[0]));
+            SSLParameters sslParameters = new SSLParameters(ciphersAvailable, protocolsAvailable);
             sslParameters.setUseCipherSuitesOrder(true);
 
-            setWebSocketFactory(new EASMWebSocketFactory(sslContext, sslParameters));
+            if (isFirst)
+                setWebSocketFactory(new EASMWebSocketFactory(sslContext, sslParameters));
+            else
+                ((EASMWebSocketFactory)getWebSocketFactory()).updateSSLDetails(sslContext, sslParameters);
 
-            long delay = sslData.u.getTime() - System.currentTimeMillis() - TimeUnit.HOURS.convert(12, TimeUnit.MILLISECONDS);
-            Executors.newSingleThreadScheduledExecutor().schedule(() ->
-            {
-                try { NRODLight.webSocket.stop(0); }
-                catch (InterruptedException ignored) {}
+            long delay = sslData.getRight().getTime() - System.currentTimeMillis() - TimeUnit.HOURS.convert(12, TimeUnit.MILLISECONDS);
+            if (delay <= 0)
+                printWebSocket("WSS cert very close to/already expired", true);
+            certExpirationTask = NRODLight.getExecutor().schedule(this::reloadSSLContext0, delay, TimeUnit.MILLISECONDS);
 
-                NRODLight.ensureServerOpen();
-            }, delay, TimeUnit.MILLISECONDS);
+            printWebSocket(String.format("Created new SSL Context with %s protocol(s) and %s as ciphers", String.join(", ", protocolsAvailable), String.join(", ", ciphersAvailable)), false, true);
         }
         else
+        {
             printWebSocket("Unable to create SSL Context", true);
+            certExpirationTask = null;
+        }
     }
 
     private Pair<SSLContext, Date> getSSLContextFromLetsEncrypt()
@@ -155,7 +160,7 @@ public class EASMWebSocket extends WebSocketServer
         String data = new String(pem);
         String[] tokens = data.split("-----BEGIN PRIVATE KEY-----");
         tokens = tokens[1].split("-----END PRIVATE KEY-----");
-        return DatatypeConverter.parseBase64Binary(tokens[0]);
+        return Base64.getDecoder().decode(tokens[0].replace("\r\n", "").replace("\n", ""));
     }
 
     @Override
@@ -177,9 +182,10 @@ public class EASMWebSocket extends WebSocketServer
             JSONObject message = new JSONObject();
             JSONObject content = new JSONObject();
             content.put("type", "HELLO");
+            content.put("messageID", "%nextid%");
             content.put("timestamp", System.currentTimeMillis());
             content.put("areas", new JSONArray());
-            content.put("options", new JSONArray());
+            content.put("options", Collections.singletonList("split_full_messages"));
             message.put("Message", content);
             easmconn.send(message.toString());
 
@@ -222,16 +228,15 @@ public class EASMWebSocket extends WebSocketServer
             }
             catch (Exception ignored) {}
 
-            printWebSocket("Error (" + ip + "):", true);
+            printWebSocket("Error (" + ip + "): " + ex.toString(), true);
             conn.close(CloseFrame.NORMAL, ex.getMessage());
         }
-        NRODLight.printThrowable(ex, "WebSocket" + (conn != null ? "-" + ip : ""));
     }
 
     @Override
     public void onStart()
     {
-        printWebSocket("Started", false);
+        printWebSocket("Started on " + getPort(), false, true);
     }
 
     @Override
@@ -240,10 +245,17 @@ public class EASMWebSocket extends WebSocketServer
         return super.getConnections().stream().filter(c -> c != null && c.isOpen()).collect(Collectors.toList());
     }
 
+    public long getConnectionCount()
+    {
+        return super.getConnections().stream().filter(c -> c != null && c.isOpen()).count();
+    }
+
     @Override
     public void stop(int timeout) throws InterruptedException
     {
         serverClosed.set(true);
+        if (certExpirationTask != null)
+            certExpirationTask.cancel(false);
         super.stop(timeout);
     }
 
@@ -254,10 +266,15 @@ public class EASMWebSocket extends WebSocketServer
 
     public static void printWebSocket(String message, boolean toErr)
     {
+        printWebSocket(message, toErr, false);
+    }
+
+    public static void printWebSocket(String message, boolean toErr, boolean forceStdout)
+    {
         if (toErr)
             NRODLight.printErr("[WebSocket] " + message);
         else
-            NRODLight.printOut("[WebSocket] " + message);
+            NRODLight.printOut("[WebSocket] " + message, forceStdout);
     }
 
     public static JSONObject updateDelayData() throws SQLException
@@ -265,43 +282,32 @@ public class EASMWebSocket extends WebSocketServer
         long start = System.nanoTime();
 
         Connection conn = DBHandler.getConnection();
-        PreparedStatement psDelayData = conn.prepareStatement("SELECT a.train_id,a.train_id_current,a.schedule_uid," +
-                "a.start_timestamp,a.current_delay,a.next_expected_update,a.off_route,a.finished,a.last_update," +
-                "GROUP_CONCAT(DISTINCT s.td ORDER BY s.td SEPARATOR ',') AS tds,TRIM(SUBSTRING_INDEX(GROUP_CONCAT(" +
-                "COALESCE(c.tps_name,l.tiploc) ORDER BY l.loc_index SEPARATOR ','),',',1)) AS loc_origin,TRIM(" +
-                "SUBSTRING_INDEX(GROUP_CONCAT(COALESCE(c.tps_name,l.tiploc) ORDER BY l.loc_index DESC SEPARATOR ',')," +
-                "',',1)) AS loc_dest,SUBSTRING_INDEX(GROUP_CONCAT(l.scheduled_departure ORDER BY l.loc_index SEPARATOR " +
-                "','),',',1) AS origin_dep FROM activations a INNER JOIN schedule_locations l ON " +
-                "a.schedule_uid=l.schedule_uid AND a.stp_indicator=l.stp_indicator AND a.schedule_date_from=l.date_from " +
-                "AND a.schedule_source=l.schedule_source LEFT JOIN corpus c ON l.tiploc=c.tiploc LEFT JOIN smart s ON " +
-                "c.stanox=s.stanox WHERE (a.last_update > (CAST(UNIX_TIMESTAMP(CURTIME(3)) AS INT) - 43200) * 1000) " +
-                "AND (a.finished=0 OR a.last_update > (CAST(UNIX_TIMESTAMP(CURTIME(3)) AS INT) - 2700) * 1000) AND " +
-                "a.cancelled=0 GROUP BY a.train_id HAVING tds IS NOT NULL");
-        ResultSet r = psDelayData.executeQuery();
-
         String[] columns = {"train_id","train_id_current","schedule_uid","start_timestamp","current_delay",
-                "next_expected_update","off_route","finished","last_update","tds","loc_origin","loc_dest","origin_dep"};
+                "next_expected_update","off_route","finished","last_update","tds","loc_origin","loc_dest","origin_dep",
+                "toc_code"};
         JSONArray resultData = new JSONArray();
-        while (r.next())
+        try(PreparedStatement psDelayData = conn.prepareStatement(Queries.DELAY_DATA))
         {
-            JSONObject jobj = new JSONObject();
-
-            for (int i = 0; i < columns.length; i++)
+            try (ResultSet r = psDelayData.executeQuery())
             {
-                if ("tds".equals(columns[i]))
-                    jobj.put(columns[i], new JSONArray(r.getString(i+1).split(",")));
-                else
-                    jobj.put(columns[i], r.getObject(i+1));
-            }
+                while (r.next())
+                {
+                    JSONObject train = new JSONObject();
 
-            resultData.put(jobj);
+                    for (int i = 0; i < columns.length; i++)
+                    {
+                        if ("tds".equals(columns[i]))
+                            train.put(columns[i], Arrays.asList(r.getString(i + 1).split(",")));
+                        else
+                            train.put(columns[i], r.getObject(i + 1));
+                    }
+
+                    resultData.put(train);
+                }
+            }
         }
-        r.close();
-        psDelayData.close();
 
         JSONObject content = new JSONObject();
-        content.put("type", "DELAYS");
-        content.put("timestamp", -1);
         content.put("timestamp_data", Long.toString(System.currentTimeMillis()));
         content.put("message", resultData);
 
@@ -315,13 +321,23 @@ public class EASMWebSocket extends WebSocketServer
         return delayData;
     }
 
-    public class Pair<T, U> {
-        public final T t;
-        public final U u;
+    public static class Pair<T, U> {
+        private final T t;
+        private final U u;
 
         public Pair(T t, U u) {
-            this.t= t;
-            this.u= u;
+            this.t = t;
+            this.u = u;
+        }
+
+        public T getLeft()
+        {
+            return t;
+        }
+
+        public U getRight()
+        {
+            return u;
         }
     }
 }

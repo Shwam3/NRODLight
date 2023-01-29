@@ -1,39 +1,29 @@
 package nrodlight;
 
 import nrodlight.db.DBHandler;
-import nrodlight.stomp.StompConnectionHandler;
+import nrodlight.stepping.Stepping;
+import nrodlight.stomp.ConnectionManager;
 import nrodlight.stomp.handlers.TDHandler;
 import nrodlight.ws.EASMWebSocket;
 import nrodlight.ws.EASMWebSocketImpl;
 import org.java_websocket.WebSocket;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.json.JSONTokener;
 
-import javax.swing.UIManager;
-import javax.swing.UnsupportedLookAndFeelException;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.PrintStream;
-import java.nio.file.FileSystems;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardWatchEventKinds;
-import java.nio.file.WatchEvent;
-import java.nio.file.WatchKey;
-import java.nio.file.WatchService;
+import javax.jms.JMSException;
+import java.io.*;
+import java.nio.file.*;
 import java.sql.SQLException;
 import java.text.SimpleDateFormat;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
-import java.util.TimeZone;
-import java.util.Timer;
-import java.util.TimerTask;
+import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 
 public class NRODLight
 {
@@ -42,10 +32,9 @@ public class NRODLight
     public static final boolean verbose = false;
     public static final AtomicBoolean STOP = new AtomicBoolean(false);
 
-    public static final File EASM_STORAGE_DIR = new File(System.getProperty("user.home", "C:") + File.separator + ".easigmap");
+    public static File EASM_STORAGE_DIR = new File(System.getProperty("user.home", System.getProperty("user.dir", "C:")), ".easigmap");
     public static JSONObject config = new JSONObject();
 
-    public static final SimpleDateFormat sdfTime;
     public static final SimpleDateFormat sdfDate;
     public static final SimpleDateFormat sdfDateTime;
 
@@ -58,24 +47,33 @@ public class NRODLight
     private static final PrintStream stdOut = System.out;
     private static final PrintStream stdErr = System.err;
 
+    private static final ScheduledExecutorService executor = Executors.newScheduledThreadPool(4,
+            new SigmapsThreadFactory("SigmapsMainExecutor"));
+
     static
     {
         TimeZone.setDefault(TimeZone.getTimeZone("Europe/London"));
 
-        sdfTime     = new SimpleDateFormat("HH:mm:ss");
+        //sdfTime     = new SimpleDateFormat("HH:mm:ss");
         sdfDate     = new SimpleDateFormat("dd/MM/yy");
         sdfDateTime = new SimpleDateFormat("dd/MM/yy HH:mm:ss");
     }
 
     public static void main(String[] args)
     {
-        try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()); }
-        catch (ClassNotFoundException | InstantiationException | IllegalAccessException | UnsupportedLookAndFeelException e) { printThrowable(e, "Look & Feel"); }
+        if (args.length >= 1)
+        {
+            File storageDir = new File(args[0]);
+            if (storageDir.exists() && storageDir.isDirectory())
+                EASM_STORAGE_DIR = storageDir;
+        }
+        System.setProperty("org.slf4j.simpleLogger.showDateTime", "true");
+        System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "[dd/MM/yy HH:mm:ss]");
 
-        Date logDate = new Date();
-        logFile = new File(EASM_STORAGE_DIR, "Logs" + File.separator + "NRODLight" + File.separator + sdfDate.format(logDate).replace("/", "-") + ".log");
+        String logDate = sdfDate.format(new Date());
+        logFile = new File(EASM_STORAGE_DIR, "Logs" + File.separator + "NRODLight" + File.separator + logDate.replace("/", "-") + ".log");
         logFile.getParentFile().mkdirs();
-        lastLogDate = sdfDate.format(logDate);
+        lastLogDate = logDate;
 
         try
         {
@@ -85,37 +83,71 @@ public class NRODLight
         }
         catch (FileNotFoundException e) { printErr("Could not create log file"); printThrowable(e, "Startup"); }
 
-        Thread.setDefaultUncaughtExceptionHandler((t, e) -> printThrowable(e, String.format("[%s-%s]", t.getName(), t.getId())));
-        printOut("[Startup] Starting... (v" + VERSION + ")");
+        printOut("[Startup] Starting... (v" + VERSION + ")", true);
+        if (executor instanceof ScheduledThreadPoolExecutor)
+        {
+            ScheduledThreadPoolExecutor exec = (ScheduledThreadPoolExecutor)executor;
+            exec.setContinueExistingPeriodicTasksAfterShutdownPolicy(false);
+            exec.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+            exec.setRemoveOnCancelPolicy(true);
+        }
+
+        printOut("[Startup] Loading config", true);
+        reloadConfig();
+
+        Thread.setDefaultUncaughtExceptionHandler((t, e) ->
+        {
+            String thread = String.format("%s-%s", t.getName(), t.getId());
+            printThrowable(e, thread);
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            try (PrintWriter pw = new PrintWriter(baos, true))
+            {
+                pw.println("Error on thread \"" + thread + "\":");
+                pw.println("<pre>");
+                e.printStackTrace(pw);
+                pw.println("</pre>");
+            }
+
+            emailUpdate("Sigmaps Error - " + e, baos.toString(), true);
+        });
         RateMonitor.getInstance(); // Initialises RateMonitor
 
-        printOut("[Startup] Loading config");
-        reloadConfig();
-        try { DBHandler.getConnection(); }
+        printOut("[Startup] Loading stepping config", true);
+        Stepping.load();
+
+        String date = sdfDateTime.format(new Date());
+        emailUpdate("Sigmaps Startup - " + date, "Sigmaps starting at " + date, false);
+
+        try { DBHandler.getConnection(); } // Initialise database connection
         catch (SQLException ex) { printThrowable(ex, "Startup"); }
 
         try
         {
-            File[] TDDataFiles = new File(NRODLight.EASM_STORAGE_DIR, "TDData").listFiles();
+            final AtomicInteger count = new AtomicInteger(-1);
+            final File[] TDDataFiles = new File(EASM_STORAGE_DIR, "TDData").listFiles();
             if (TDDataFiles != null)
             {
+                count.incrementAndGet();
                 Arrays.stream(TDDataFiles)
                         .filter(File::isFile)
                         .filter(File::canRead)
                         .filter(f -> f.getName().endsWith(".td"))
                         .forEach(f ->
                         {
-                            try {
-                                JSONObject data = new JSONObject(new String(Files.readAllBytes(f.toPath())));
+                            try (final BufferedReader br = new BufferedReader(new FileReader(f)))
+                            {
+                                final JSONObject data = new JSONObject(new JSONTokener(br));
                                 data.keys().forEachRemaining(k -> TDHandler.DATA_MAP.putIfAbsent(k, data.getString(k)));
+                                count.incrementAndGet();
                             } catch (IOException e) {
-                                NRODLight.printErr("[TD-Startup] Cannot read " + f.getName());
+                                printErr("[TD-Startup] Cannot read " + f.getName());
                             } catch (JSONException e) {
-                                NRODLight.printErr("[TD-Startup] Malformed JSON in " + f.getName());
+                                printErr("[TD-Startup] Malformed JSON in " + f.getName());
                             }
                         });
             }
-            printOut("[Startup] Finished reading TD data");
+            printOut("[Startup] Finished reading TD data, read " + count + " files", true);
         }
         catch (Exception e) { NRODLight.printThrowable(e, "TD-Startup"); }
 
@@ -127,8 +159,13 @@ public class NRODLight
 
         Runtime.getRuntime().addShutdownHook(new Thread(() ->
         {
-            printOut("[Main] Stopping...");
+            printOut("[Main] Stopping...", true);
             STOP.getAndSet(true);
+
+            executor.shutdown();
+
+            //StompConnectionHandler.disconnect();
+            ConnectionManager.stop();
 
             if (webSocket != null)
             {
@@ -136,22 +173,32 @@ public class NRODLight
                 catch (Throwable ignored) {}
             }
 
-            StompConnectionHandler.disconnect();
-
             DBHandler.closeConnection();
         }, "NRODShutdown"));
 
-        new Thread(() ->
+        Thread fileWatcher = new Thread(() ->
         {
-            printOut("[Startup] File watcher started");
+            printOut("[Startup] File watcher started", true);
 
             final Path configPath = new File(EASM_STORAGE_DIR, "config.json").toPath();
             final Path manualTDPath = new File(EASM_STORAGE_DIR, "set_data.json").toPath();
+            final Path steppingFile = new File(EASM_STORAGE_DIR, "steps.json").toPath();
 
             try (final WatchService watchService = FileSystems.getDefault().newWatchService())
             {
                 final WatchKey watchKey = EASM_STORAGE_DIR.toPath().register(watchService,
                         StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_CREATE);
+
+                search:
+                for (Map.Entry<Thread, StackTraceElement[]> entry : Thread.getAllStackTraces().entrySet())
+                {
+                    for (StackTraceElement s : entry.getValue())
+                        if ("sun.nio.fs.LinuxWatchService".equals(s.getClassName()))
+                        {
+                            entry.getKey().setName("LinuxFileChangeWatcher");
+                            break search;
+                        }
+                }
 
                 while (!STOP.get())
                 {
@@ -160,27 +207,38 @@ public class NRODLight
                     {
                         if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE ||
                                 event.kind() == StandardWatchEventKinds.ENTRY_MODIFY &&
-                                event.context() instanceof Path && configPath.endsWith((Path) event.context()))
+                                        event.context() instanceof Path && configPath.endsWith((Path) event.context()))
                         {
-                            printOut("[Config] Reloading config");
+                            printOut("[Config] Reloading config", true);
                             reloadConfig();
                         }
                         else if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE ||
                                 event.kind() == StandardWatchEventKinds.ENTRY_MODIFY &&
-                                event.context() instanceof Path && manualTDPath.endsWith((Path) event.context()))
+                                        event.context() instanceof Path && manualTDPath.endsWith((Path) event.context()))
                         {
                             try
                             {
                                 JSONObject data = new JSONObject(new String(Files.readAllBytes(manualTDPath)));
                                 final Map<String, String> updateMap = new HashMap<>();
-                                data.keys().forEachRemaining(d -> updateMap.put(d, data.getString(d)));
+                                data.keys().forEachRemaining(d -> {
+                                    String value = data.optString(d, null);
+                                    if (d.length() == 6 && (value == null || value.isEmpty() || "0".equals(value) || "1".equals(value) || value.length() == 4))
+                                        updateMap.put(d, value);
+                                });
 
-                                printOut("[TD] Manual TD input received, " + updateMap.size() + " changes");
-                                TDHandler.updateClients(updateMap);
+                                printOut("[TD] Manual TD input received, " + updateMap.size() + " changes", true);
+                                TDHandler.updateClientsAndSave(updateMap);
 
                                 Files.deleteIfExists(manualTDPath);
                             }
                             catch (JSONException | IOException ex) { printThrowable(ex, "TD"); }
+                        }
+                        else if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE ||
+                                event.kind() == StandardWatchEventKinds.ENTRY_MODIFY &&
+                                        event.context() instanceof Path && steppingFile.endsWith((Path) event.context()))
+                        {
+                            printOut("[Stepping] Reloading stepping config", true);
+                            Stepping.load();
                         }
                     }
                     wk.reset();
@@ -189,53 +247,81 @@ public class NRODLight
             }
             catch (IOException e) { printThrowable(e, "FileChangeWatcher"); }
             catch (InterruptedException ignored) {}
-        }, "FileChangeWatcher").start();
+        }, "FileChangeWatcher");
+        fileWatcher.setDaemon(true);
+        fileWatcher.start();
 
         ensureServerOpen();
 
-        if (StompConnectionHandler.wrappedConnect())
-            StompConnectionHandler.printStomp("Initialised and working", false);
-        else
-            StompConnectionHandler.printStomp("Unble to start", true);
+        //((VSTPHandler)VSTPHandler.getInstance()).unpauseVSTPs();
 
-        Timer FullUpdateMessenger = new Timer("FullUpdateMessenger");
-        FullUpdateMessenger.schedule(new TimerTask()
+        //if (StompConnectionHandler.wrappedConnect())
+        //    StompConnectionHandler.printStomp("Initialised and working", false);
+        //else
+        //    StompConnectionHandler.printStomp("Unable to start", true);
+        try
         {
-            @Override
-            public void run()
+            ConnectionManager.start();
+        }
+        catch (JMSException ex)
+        {
+            printThrowable(ex, "ActiveMQ");
+        }
+
+        executor.scheduleAtFixedRate(() ->
+        {
+            try
             {
+                JSONObject message = new JSONObject();
+                JSONObject content = new JSONObject();
+                content.put("type", "SEND_ALL");
+                content.put("messageID", "%nextid%");
+                content.put("timestamp", System.currentTimeMillis());
+                content.put("message", TDHandler.DATA_MAP);
+                message.put("Message", content);
+                String messageStr = message.toString();
+
+                Map<String, JSONObject> splitMessages = new HashMap<>();
+                Map<String, String> splitMessagesStr = new HashMap<>();
+                TDHandler.DATA_MAP.forEach((k,v) ->
+                {
+                    JSONObject obj = Optional.ofNullable(splitMessages.get(k.substring(0, 2))).orElseGet(JSONObject::new);
+                    splitMessages.putIfAbsent(k.substring(0, 2), obj);
+                    obj.put(k, v);
+                });
+                content.remove("message");
+                content.put("timestamp", System.currentTimeMillis());
+                splitMessages.forEach((k,v) ->
+                {
+                    content.put("message", v);
+                    content.put("td_area", k);
+                    splitMessagesStr.put(k, message.toString());
+                });
+
+                ensureServerOpen();
+                if (webSocket != null)
+                {
+                    webSocket.getConnections().stream()
+                            .filter(Objects::nonNull)
+                            .filter(WebSocket::isOpen)
+                            .filter(c -> c instanceof EASMWebSocketImpl)
+                            .map(EASMWebSocketImpl.class::cast)
+                            .filter(((Predicate<EASMWebSocketImpl>) EASMWebSocketImpl::optMessageIDs).negate())
+                            .filter(EASMWebSocketImpl::areasNotEmpty)
+                            .forEach(c ->
+                            {
+                                if (c.optSplitFullMessages())
+                                    c.sendSplit(splitMessagesStr);
+                                else
+                                    c.send(messageStr);
+                            });
+                    EASMWebSocket.printWebSocket("Updated all clients", false);
+                }
+
                 try
                 {
-                    JSONObject message = new JSONObject();
-                    JSONObject content = new JSONObject();
-                    content.put("type", "SEND_ALL");
-                    content.put("timestamp", System.currentTimeMillis());
-                    content.put("message", TDHandler.DATA_MAP);
-                    message.put("Message", content);
-                    String messageStr = message.toString();
+                    final JSONObject delayData = EASMWebSocket.updateDelayData();
 
-                    Map<String, JSONObject> splitMessages = new HashMap<>();
-                    Map<String, String> splitMessagesStr = new HashMap<>();
-                    TDHandler.DATA_MAP.forEach((k,v) ->
-                    {
-                        JSONObject obj = splitMessages.get(k.substring(0, 2));
-                        if (obj == null)
-                        {
-                            obj = new JSONObject();
-                            splitMessages.put(k.substring(0, 2), obj);
-                        }
-                        obj.put(k, v);
-                    });
-                    content.remove("message");
-                    content.put("timestamp", System.currentTimeMillis());
-                    splitMessages.forEach((k,v) ->
-                    {
-                        content.put("message", v);
-                        content.put("td_area", k);
-                        splitMessagesStr.put(k, message.toString());
-                    });
-
-                    ensureServerOpen();
                     if (webSocket != null)
                     {
                         webSocket.getConnections().stream()
@@ -243,37 +329,15 @@ public class NRODLight
                                 .filter(WebSocket::isOpen)
                                 .filter(c -> c instanceof EASMWebSocketImpl)
                                 .map(EASMWebSocketImpl.class::cast)
-                                .forEach(c ->
-                                {
-                                    if (c.optSplitFullMessages())
-                                        c.sendSplit(splitMessagesStr);
-                                    else
-                                        c.send(messageStr);
-                                });
-                        EASMWebSocket.printWebSocket("Updated all clients", false);
+                                .filter(EASMWebSocketImpl::optDelayColouration)
+                                .filter(EASMWebSocketImpl::areasNotEmpty)
+                                .forEach(c -> c.sendDelayData(delayData));
                     }
-
-                    try
-                    {
-                        final JSONObject delayData = EASMWebSocket.updateDelayData();
-
-                        if (webSocket != null)
-                        {
-                            webSocket.getConnections().stream()
-                                    .filter(Objects::nonNull)
-                                    .filter(WebSocket::isOpen)
-                                    .filter(c -> c instanceof EASMWebSocketImpl)
-                                    .map(EASMWebSocketImpl.class::cast)
-                                    .filter(EASMWebSocketImpl::optDelayColouration)
-                                    .forEach(c -> c.sendDelayData(delayData));
-                        }
-
-                    }
-                    catch (SQLException sqlex) { printThrowable(sqlex, "SendAll-Delays"); }
                 }
-                catch (Exception e) { printThrowable(e, "SendAll"); }
+                catch (SQLException sqlex) { printThrowable(sqlex, "SendAll-Delays"); }
             }
-        }, 500, 30000);
+            catch (Exception e) { printThrowable(e, "SendAll"); }
+        }, 500, 30000, TimeUnit.MILLISECONDS);
     }
 
     //<editor-fold defaultstate="collapsed" desc="Print methods">
@@ -302,7 +366,7 @@ public class NRODLight
     {
         if (t != null)
         {
-            printErr((name != null && !name.isEmpty() ? "[" + name + "] " : "") + t.toString());
+            printErr((name != null && !name.isEmpty() ? "[" + name + "] " : "") + t);
 
             for (StackTraceElement element : t.getStackTrace())
                 printErr((name != null && !name.isEmpty() ? "[" + name + "] -> " : " -> ") + element.toString());
@@ -311,29 +375,39 @@ public class NRODLight
 
     public static void printOut(String message)
     {
+        printOut(message, false);
+    }
+
+    public static void printOut(String message, boolean forceStdout)
+    {
         if (message != null && !message.equals(""))
             if (!message.contains("\n"))
-                print("[" + sdfDateTime.format(new Date()) + "] " + message, false);
+                print("[" + sdfDateTime.format(new Date()) + "] " + message, false, forceStdout);
             else
                 for (String msgPart : message.split("\n"))
-                    print("[" + sdfDateTime.format(new Date()) + "] " + msgPart, false);
+                    print("[" + sdfDateTime.format(new Date()) + "] " + msgPart, false, forceStdout);
     }
 
     public static void printErr(String message)
     {
         if (message != null && !message.equals(""))
             if (!message.contains("\n"))
-                print("[" + sdfDateTime.format(new Date()) + "] !!!> " + message + " <!!!", false);
+                print("[" + sdfDateTime.format(new Date()) + "] !!!> " + message + " <!!!", true);
             else
                 for (String msgPart : message.split("\n"))
                     print("[" + sdfDateTime.format(new Date()) + "] !!!> " + msgPart + " <!!!", true);
     }
 
-    private static synchronized void print(String message, boolean toErr)
+    private static void print(String message, boolean toErr)
+    {
+        print(message, toErr, toErr);
+    }
+
+    private static synchronized void print(String message, boolean toErr, boolean forceStdout)
     {
         if (toErr)
             stdErr.println(message);
-        else
+        else if (forceStdout)
             stdOut.println(message);
 
         filePrint(message);
@@ -382,7 +456,7 @@ public class NRODLight
                 }
                 finally
                 {
-                    EASMWebSocket.printWebSocket("WebSocket server runnable finished" + (ews.isClosed() ? "" : " unnexpectedly"), !ews.isClosed());
+                    EASMWebSocket.printWebSocket("WebSocket server runnable finished" + (ews.isClosed() ? "" : " unnexpectedly"), !ews.isClosed(), true);
 
                     if (ews == webSocket)
                     {
@@ -400,25 +474,64 @@ public class NRODLight
 
     public static void reloadConfig()
     {
-        try
+        try (BufferedReader br = new BufferedReader(new FileReader(new File(EASM_STORAGE_DIR, "config.json"))))
         {
-            String configContents = new String(Files.readAllBytes(new File(EASM_STORAGE_DIR, "config.json").toPath()));
-
             JSONObject oldConfig = config;
-            config = new JSONObject(configContents);
+            config = new JSONObject(new JSONTokener(br));
 
             if (oldConfig != null && oldConfig.has("WSPort") && config.has("WSPort")
                     && oldConfig.optInt("WSPort") != config.optInt("WSPort"))
             {
+                printOut("Restarting WS Server on " + config.optInt("WSPort"), true);
+
                 try { webSocket.stop(0); }
                 catch (InterruptedException ignored) {}
 
                 ensureServerOpen();
             }
+
+            if (oldConfig != null && oldConfig.has("TDLogging") && config.has("TDLogging")
+                    && oldConfig.optBoolean("TDLogging") != config.optBoolean("TDLogging"))
+            {
+                if (config.optBoolean("TDLogging"))
+                    TDHandler.startLogging();
+                else
+                    TDHandler.stopLogging();
+            }
+
+            /*
+            if (oldConfig != null && oldConfig.has("pause_VSTP") && config.optBoolean("pause_VSTP", false))
+            {
+                ((VSTPHandler)VSTPHandler.getInstance()).unpauseVSTPs();
+            }
+            */
         }
-        catch (IOException | JSONException e)
+        catch (IOException | JSONException ex)
         {
-            NRODLight.printThrowable(e, "Config");
+            NRODLight.printThrowable(ex, "Config");
         }
+    }
+
+    public static void emailUpdate(String subject, String content, boolean waitFor)
+    {
+        if (config.has("update-email") && config.getString("update-email").contains("@"))
+        {
+            try
+            {
+                String[] args = new String[] {"/usr/bin/mail", "-a", "Content-Type: text/html", "-s", subject, config.getString("update-email")};
+                Process p = Runtime.getRuntime().exec(args);
+                p.getOutputStream().write(content.getBytes());
+                p.getOutputStream().close();
+
+                if (waitFor)
+                    p.waitFor();
+            }
+            catch (IOException | InterruptedException e) {printThrowable(e, "Emailer");}
+        }
+    }
+
+    public static ScheduledExecutorService getExecutor()
+    {
+        return executor;
     }
 }

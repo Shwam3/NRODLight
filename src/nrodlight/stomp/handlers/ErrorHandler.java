@@ -1,21 +1,27 @@
 package nrodlight.stomp.handlers;
 
-import java.util.Map;
-import net.ser1.stomp.Listener;
-import static nrodlight.stomp.StompConnectionHandler.printStomp;
+import nrodlight.NRODLight;
 
-public class ErrorHandler implements Listener
+import javax.jms.JMSException;
+
+public class ErrorHandler //implements Listener
 {
+    /*
     @Override
     public void message(Map<String, String> headers, String message)
     {
         if (headers != null)
-            printStomp(headers.get("message").trim(), true);
+            StompConnectionHandler.printStomp(headers.get("message").trim(), true);
         else
-            printStomp("No header in error message", true);
+            StompConnectionHandler.printStomp("No header in error message", true);
 
         if (message != null && !message.isEmpty())
-            printStomp(message.trim().replace("\n", "\n[Stomp]"), true);
+            StompConnectionHandler.printStomp(message.trim().replace("\n", "\n[Stomp]"), true);
     }
+    */
 
+    public static void onException(JMSException exception)
+    {
+        NRODLight.printThrowable(exception, "ActiveMQ");
+    }
 }

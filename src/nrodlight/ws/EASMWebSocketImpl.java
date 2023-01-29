@@ -9,28 +9,35 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.StreamSupport;
 
 public class EASMWebSocketImpl extends WebSocketImpl
 {
     private List<String> areas = Collections.emptyList();
-    private boolean delayColouration = false;
-    private boolean splitFullMessages = false;
+    private final AtomicLong messageID = new AtomicLong(-1);
+    private final Map<String, Boolean> clientOptions;
     private String IP = null;
 
     public EASMWebSocketImpl(WebSocketListener listener, Draft draft)
     {
         super(listener, draft);
+
+        clientOptions = new HashMap<>();
+        clientOptions.put("delayColouration", false);
+        clientOptions.put("splitFullMessages", true);
+        clientOptions.put("messageIDs", false);
     }
 
     public EASMWebSocketImpl(WebSocketListener listener, List<Draft> drafts)
     {
         super(listener, drafts == null || drafts.isEmpty() ? Collections.singletonList(new EASMDraft_6455()) : drafts);
+
+        clientOptions = new HashMap<>();
+        clientOptions.put("delayColouration", false);
+        clientOptions.put("splitFullMessages", true);
+        clientOptions.put("messageIDs", false);
     }
 
     public void setIP(String IP)
@@ -44,14 +51,24 @@ public class EASMWebSocketImpl extends WebSocketImpl
         return IP;
     }
 
+    public boolean areasNotEmpty()
+    {
+        return !areas.isEmpty();
+    }
+
     public boolean optSplitFullMessages()
     {
-        return splitFullMessages;
+        return clientOptions.get("splitFullMessages");
     }
 
     public boolean optDelayColouration()
     {
-        return delayColouration;
+        return clientOptions.get("delayColouration");
+    }
+
+    public boolean optMessageIDs()
+    {
+        return clientOptions.get("messageIDs");
     }
 
     public void send(Map<String, String> messages) throws WebsocketNotConnectedException
@@ -79,16 +96,17 @@ public class EASMWebSocketImpl extends WebSocketImpl
             .forEach(this::send);
     }
 
-    public void sendAll() throws WebsocketNotConnectedException
+    public void sendAll(boolean clientRequested) throws WebsocketNotConnectedException
     {
-        if (!areas.isEmpty())
+        if (!areas.isEmpty() && (!optMessageIDs() || clientRequested))
         {
             JSONObject message = new JSONObject();
             JSONObject content = new JSONObject();
             content.put("type", "SEND_ALL");
+            content.put("messageID", "%nextid%");
             content.put("timestamp", System.currentTimeMillis());
             message.put("Message", content);
-            if (!splitFullMessages)
+            if (!optSplitFullMessages())
             {
                 content.put("message", TDHandler.DATA_MAP);
 
@@ -103,12 +121,8 @@ public class EASMWebSocketImpl extends WebSocketImpl
                     if (!areas.contains(area) && !"XX".equals(area))
                         return;
 
-                    JSONObject obj = splitMessages.get(area);
-                    if (obj == null)
-                    {
-                        obj = new JSONObject();
-                        splitMessages.put(area, obj);
-                    }
+                    JSONObject obj = splitMessages.getOrDefault(area, new JSONObject());
+                    splitMessages.putIfAbsent(area, obj);
                     obj.put(k, v);
                 });
                 splitMessages.forEach((k,v) ->
@@ -121,6 +135,17 @@ public class EASMWebSocketImpl extends WebSocketImpl
         }
     }
 
+    @Override
+    public void send(String text)
+    {
+        if (optMessageIDs() && text.contains("\"%nextid%\""))
+            text = text.replace("\"%nextid%\"", Long.toString(messageID.incrementAndGet()));
+        else
+            text = text.replace("\"%nextid%\"", "-1");
+
+        super.send(text);
+    }
+
     public void receive(String message)
     {
         try
@@ -129,44 +154,45 @@ public class EASMWebSocketImpl extends WebSocketImpl
             msg = msg.getJSONObject("Message");
 
             String type = msg.getString("type");
-            switch(type)
+            if ("SET_AREAS".equals(type) || "SET_OPTIONS".equals(type))
             {
-                case "SET_AREAS":
-                case "SET_OPTIONS":
-                    JSONArray areasNew = msg.optJSONArray("areas");
-                    if (areasNew == null || areasNew.length() == 0)
-                        areas = Collections.emptyList();
-                    else
+                JSONArray areasNew = msg.optJSONArray("areas");
+                if (areasNew == null || areasNew.length() == 0)
+                    areas = Collections.emptyList();
+                else
+                {
+                    List<String> l = new ArrayList<>(areasNew.length());
+                    for (Object i : areasNew)
+                        l.add(String.valueOf(i));
+                    areas = l;
+                }
+
+                boolean delayColourationNew = false;
+                boolean splitFullMessagesNew = false;
+                boolean messageIDsNew = false;
+
+                JSONArray options = msg.optJSONArray("options");
+                if (options != null && options.length() > 0)
+                {
+                    for (Object i : options)
                     {
-                        List<String> l = new ArrayList<>(areasNew.length());
-                        for (Object i : areasNew)
-                            l.add(String.valueOf(i));
-                        areas = l;
+                        String iStr = String.valueOf(i);
+                        if ("delay_colouration".equals(iStr))
+                            delayColourationNew = true;
+                        else if ("split_full_messages".equals(iStr))
+                            splitFullMessagesNew = true;
+                        else if ("message_ids".equals(iStr))
+                            messageIDsNew = true;
                     }
+                }
 
-                    boolean delayColourationNew = false;
-                    boolean splitFullMessagesNew = false;
+                clientOptions.put("delayColouration", delayColourationNew);
+                clientOptions.put("splitFullMessages", splitFullMessagesNew);
+                clientOptions.put("messageIDs", messageIDsNew);
 
-                    JSONArray options = msg.optJSONArray("options");
-                    if (options != null && options.length() > 0)
-                    {
-                        for (Object i : options)
-                        {
-                            String iStr = String.valueOf(i);
-                            if ("delay_colouration".equals(iStr))
-                                delayColourationNew = true;
-                            else if ("split_full_messages".equals(iStr))
-                                splitFullMessagesNew = true;
-                        }
-                    }
-
-                    this.delayColouration = delayColourationNew;
-                    this.splitFullMessages = splitFullMessagesNew;
-
-                    sendAll();
-                    if (delayColourationNew && EASMWebSocket.getDelayData() != null)
-                        sendDelayData(EASMWebSocket.getDelayData());
-                    break;
+                sendAll(true);
+                if (delayColourationNew && EASMWebSocket.getDelayData() != null)
+                    sendDelayData(EASMWebSocket.getDelayData());
             }
         }
         catch(WebsocketNotConnectedException e)
@@ -183,12 +209,12 @@ public class EASMWebSocketImpl extends WebSocketImpl
     @Override
     public String toString()
     {
-        return EASMWebSocketImpl.class.getName() + ":" + getRemoteSocketAddress().toString() + new JSONArray(areas).toString();
+        return EASMWebSocketImpl.class.getName() + ":" + getRemoteSocketAddress() + new JSONArray(areas);
     }
 
     public void sendDelayData(JSONObject delayData)
     {
-        if (!optDelayColouration())
+        if (!optDelayColouration() || !isOpen())
             return;
 
         JSONArray delaysDataSend = new JSONArray();
@@ -201,6 +227,7 @@ public class EASMWebSocketImpl extends WebSocketImpl
 
         JSONObject content = new JSONObject();
         content.put("type", "DELAYS");
+        content.put("messageID", "%nextid%");
         content.put("timestamp", System.currentTimeMillis());
         content.put("timestamp_data", delayData.getLong("timestamp_data"));
         content.put("message", delaysDataSend);

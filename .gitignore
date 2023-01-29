@@ -61,8 +61,14 @@ $RECYCLE.BIN/
 /dist
 /build
 /nbproject
+/certs
+/src-remote
+/src-local
+/sigmaps
 /.idea
 src/nrodclient/resources/daphkey.openssh
 *.bak
 build.xml
 manifest.mf
+decomp.ps1
+build-/built-jar.properties
