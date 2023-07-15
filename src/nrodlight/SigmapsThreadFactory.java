@@ -17,7 +17,7 @@ public class SigmapsThreadFactory implements ThreadFactory
     @Override
     public Thread newThread(Runnable runnable) {
         Thread thread = defaultThreadFactory.newThread(runnable);
-        thread.setName(threadPrefix + "-" + threadNumber + "-" + thread.getId());
+        thread.setName(threadPrefix + "-" + threadNumber.getAndIncrement() + "-" + thread.getId());
         return thread;
     }
 }

@@ -42,22 +42,22 @@ public class EASMWebSocket extends WebSocketServer
     private final AtomicBoolean serverClosed = new AtomicBoolean(false);
     private static JSONObject delayData = null;
     private ScheduledFuture<?> certExpirationTask;
+    private EASMWebSocketFactory wsf;
 
     public EASMWebSocket()
     {
         super(new InetSocketAddress(NRODLight.config.optInt("WSPort",8443)),
+                4, // Number of worker threads
                 Collections.singletonList(new EASMDraft_6455()));
         super.setReuseAddr(true);
 
-        reloadSSLContext(true);
+        wsf = new EASMWebSocketFactory();
+        setWebSocketFactory(wsf);
+
+        reloadSSLContext();
     }
 
-    private void reloadSSLContext0()
-    {
-        reloadSSLContext(false);
-    }
-
-    private void reloadSSLContext(boolean isFirst)
+    private void reloadSSLContext()
     {
         if (certExpirationTask != null)
             certExpirationTask.cancel(false);
@@ -87,15 +87,12 @@ public class EASMWebSocket extends WebSocketServer
             SSLParameters sslParameters = new SSLParameters(ciphersAvailable, protocolsAvailable);
             sslParameters.setUseCipherSuitesOrder(true);
 
-            if (isFirst)
-                setWebSocketFactory(new EASMWebSocketFactory(sslContext, sslParameters));
-            else
-                ((EASMWebSocketFactory)getWebSocketFactory()).updateSSLDetails(sslContext, sslParameters);
+            wsf.updateSSLDetails(sslContext, sslParameters);
 
             long delay = sslData.getRight().getTime() - System.currentTimeMillis() - TimeUnit.HOURS.convert(12, TimeUnit.MILLISECONDS);
             if (delay <= 0)
                 printWebSocket("WSS cert very close to/already expired", true);
-            certExpirationTask = NRODLight.getExecutor().schedule(this::reloadSSLContext0, delay, TimeUnit.MILLISECONDS);
+            certExpirationTask = NRODLight.getExecutor().schedule(this::reloadSSLContext, delay, TimeUnit.MILLISECONDS);
 
             printWebSocket(String.format("Created new SSL Context with %s protocol(s) and %s as ciphers", String.join(", ", protocolsAvailable), String.join(", ", ciphersAvailable)), false, true);
         }
@@ -111,26 +108,28 @@ public class EASMWebSocket extends WebSocketServer
         SSLContext context;
         Date expiry;
         File certDir = new File(NRODLight.EASM_STORAGE_DIR, "certs");
-        try
-        {
+        try {
             context = SSLContext.getInstance("TLS");
 
-            byte[] keyBytes = parseDERFromPEM(Files.readAllBytes(new File(certDir , "privkey.pem").toPath()));
+            byte[] keyBytes = parseDERFromPEM(Files.readAllBytes(new File(certDir, "privkey.pem").toPath()));
 
             X509Certificate cert;
-            try (FileInputStream fis = new FileInputStream(new File(certDir, "cert.pem")))
-            {
+            try (FileInputStream fis = new FileInputStream(new File(certDir, "cert.pem"))) {
                 cert = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(fis);
             }
             expiry = cert.getNotAfter();
 
             X509Certificate chain;
-            try (FileInputStream fis = new FileInputStream(new File(certDir, "chain.pem")))
-            {
+            try (FileInputStream fis = new FileInputStream(new File(certDir, "chain.pem"))) {
                 chain = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(fis);
             }
             if (chain.getNotAfter().getTime() < cert.getNotAfter().getTime())
                 expiry = chain.getNotAfter();
+
+            if (expiry.getTime() < System.currentTimeMillis()) {
+                printWebSocket("WSS Certificate expired (" + expiry + ")", true);
+                return null;
+            }
 
             KeyFactory keyFactory = KeyFactory.getInstance("RSA");
             PrivateKey key = keyFactory.generatePrivate(new PKCS8EncodedKeySpec(keyBytes));
@@ -279,41 +278,44 @@ public class EASMWebSocket extends WebSocketServer
 
     public static JSONObject updateDelayData() throws SQLException
     {
-        long start = System.nanoTime();
+        if (NRODLight.config.optBoolean("delays_active", true)) {
+            final long start = System.nanoTime();
+            long queryEnd = -1;
 
-        Connection conn = DBHandler.getConnection();
-        String[] columns = {"train_id","train_id_current","schedule_uid","start_timestamp","current_delay",
-                "next_expected_update","off_route","finished","last_update","tds","loc_origin","loc_dest","origin_dep",
-                "toc_code"};
-        JSONArray resultData = new JSONArray();
-        try(PreparedStatement psDelayData = conn.prepareStatement(Queries.DELAY_DATA))
-        {
-            try (ResultSet r = psDelayData.executeQuery())
-            {
-                while (r.next())
-                {
-                    JSONObject train = new JSONObject();
+            final Connection conn = DBHandler.getConnection();
+            final String[] columns = {"train_id", "train_id_current", "schedule_uid", "start_timestamp", "current_delay",
+                    "next_expected_update", "off_route", "finished", "last_update", "tds", "loc_origin", "loc_dest", "origin_dep",
+                    "toc_code"};
+            final JSONArray resultData = new JSONArray();
+            try (final PreparedStatement psDelayData = conn.prepareStatement(Queries.DELAY_DATA)) {
+                try (final ResultSet r = psDelayData.executeQuery()) {
+                    queryEnd = System.nanoTime();
+                    while (r.next()) {
+                        final JSONObject train = new JSONObject();
+                        for (int i = 0; i < columns.length; i++) {
+                            if ("tds".equals(columns[i]))
+                                train.put(columns[i], Arrays.asList(r.getString(i + 1).split(",")));
+                            else
+                                train.put(columns[i], r.getObject(i + 1));
+                        }
 
-                    for (int i = 0; i < columns.length; i++)
-                    {
-                        if ("tds".equals(columns[i]))
-                            train.put(columns[i], Arrays.asList(r.getString(i + 1).split(",")));
-                        else
-                            train.put(columns[i], r.getObject(i + 1));
+                        resultData.put(train);
                     }
-
-                    resultData.put(train);
                 }
             }
+
+            final JSONObject content = new JSONObject();
+            content.put("timestamp_data", Long.toString(System.currentTimeMillis()));
+            content.put("message", resultData);
+
+            NRODLight.printOut(String.format("[Delays] Updated in %.2fms (query %.2fms)", (System.nanoTime() - start) / 1000000d, queryEnd == -1 ? -1 : (queryEnd - start) / 1000000d));
+
+            delayData = content;
         }
+        else
+            NRODLight.printOut("[Delays] Delay data updates disabled");
 
-        JSONObject content = new JSONObject();
-        content.put("timestamp_data", Long.toString(System.currentTimeMillis()));
-        content.put("message", resultData);
-
-        NRODLight.printOut(String.format("[Delays] Updated in %.2fms", (System.nanoTime() - start) / 1000000d));
-
-        return EASMWebSocket.delayData = content;
+        return delayData;
     }
 
     public static JSONObject getDelayData()

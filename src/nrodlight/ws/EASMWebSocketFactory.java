@@ -1,11 +1,12 @@
 package nrodlight.ws;
 
+import nrodlight.NRODLight;
 import nrodlight.SigmapsThreadFactory;
 import org.java_websocket.SSLSocketChannel2;
 import org.java_websocket.WebSocketAdapter;
 import org.java_websocket.WebSocketImpl;
+import org.java_websocket.WebSocketServerFactory;
 import org.java_websocket.drafts.Draft;
-import org.java_websocket.server.DefaultSSLWebSocketServerFactory;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
@@ -15,23 +16,28 @@ import java.nio.channels.ByteChannel;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
 import java.util.List;
-import java.util.Objects;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-public class EASMWebSocketFactory extends DefaultSSLWebSocketServerFactory
-{
+public class EASMWebSocketFactory implements WebSocketServerFactory {
+    private SSLContext sslContext;
+    private ExecutorService executor;
     private SSLParameters sslParameters;
+
+    public EASMWebSocketFactory() {
+        this(null, null);
+    }
 
     public EASMWebSocketFactory(SSLContext sslContext, SSLParameters sslParameters)
     {
-        super(sslContext, Executors.newSingleThreadExecutor(new SigmapsThreadFactory("SocketFactoryExecutor")));
-
-        this.sslParameters = Objects.requireNonNull(sslParameters);
+        this.sslContext = sslContext;
+        this.sslParameters = sslParameters;
+        this.executor = Executors.newSingleThreadExecutor(new SigmapsThreadFactory("SocketFactoryExecutor"));
     }
 
     public void updateSSLDetails(SSLContext sslContext, SSLParameters sslParameters)
     {
-        this.sslcontext = sslContext;
+        this.sslContext = sslContext;
         this.sslParameters = sslParameters;
     }
 
@@ -50,9 +56,21 @@ public class EASMWebSocketFactory extends DefaultSSLWebSocketServerFactory
     @Override
     public ByteChannel wrapChannel(SocketChannel channel, SelectionKey key) throws IOException
     {
-        SSLEngine e = sslcontext.createSSLEngine();
-        e.setUseClientMode(false);
-        e.setSSLParameters(sslParameters);
-        return new SSLSocketChannel2(channel, e, exec, key);
+        if (sslContext != null && sslParameters != null) {
+            SSLEngine e = sslContext.createSSLEngine();
+            e.setUseClientMode(false);
+            e.setSSLParameters(sslParameters);
+            return new SSLSocketChannel2(channel, e, executor, key);
+        } else {
+            if (NRODLight.config.optBoolean("strict_wss", true))
+                throw new IOException("SSL Context not set with strict_wss mode set");
+
+            return channel;
+        }
+    }
+
+    @Override
+    public void close() {
+        executor.shutdown();
     }
 }

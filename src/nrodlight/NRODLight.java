@@ -23,7 +23,6 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Predicate;
 
 public class NRODLight
 {
@@ -151,11 +150,13 @@ public class NRODLight
         }
         catch (Exception e) { NRODLight.printThrowable(e, "TD-Startup"); }
 
-        try
-        {
-            EASMWebSocket.updateDelayData();
-        }
-        catch (Exception e) { printThrowable(e, "Startup-Delays"); }
+        executor.execute(() -> {
+            try {
+                EASMWebSocket.updateDelayData();
+            } catch (SQLException e) {
+                printThrowable(e, "Startup-Delays");
+            }
+        });
 
         Runtime.getRuntime().addShutdownHook(new Thread(() ->
         {
@@ -164,7 +165,6 @@ public class NRODLight
 
             executor.shutdown();
 
-            //StompConnectionHandler.disconnect();
             ConnectionManager.stop();
 
             if (webSocket != null)
@@ -174,6 +174,8 @@ public class NRODLight
             }
 
             DBHandler.closeConnection();
+
+            printOut("[Main] Stopped", true);
         }, "NRODShutdown"));
 
         Thread fileWatcher = new Thread(() ->
@@ -253,12 +255,6 @@ public class NRODLight
 
         ensureServerOpen();
 
-        //((VSTPHandler)VSTPHandler.getInstance()).unpauseVSTPs();
-
-        //if (StompConnectionHandler.wrappedConnect())
-        //    StompConnectionHandler.printStomp("Initialised and working", false);
-        //else
-        //    StompConnectionHandler.printStomp("Unable to start", true);
         try
         {
             ConnectionManager.start();
@@ -301,40 +297,31 @@ public class NRODLight
                 ensureServerOpen();
                 if (webSocket != null)
                 {
-                    webSocket.getConnections().stream()
-                            .filter(Objects::nonNull)
-                            .filter(WebSocket::isOpen)
-                            .filter(c -> c instanceof EASMWebSocketImpl)
-                            .map(EASMWebSocketImpl.class::cast)
-                            .filter(((Predicate<EASMWebSocketImpl>) EASMWebSocketImpl::optMessageIDs).negate())
-                            .filter(EASMWebSocketImpl::areasNotEmpty)
-                            .forEach(c ->
-                            {
-                                if (c.optSplitFullMessages())
-                                    c.sendSplit(splitMessagesStr);
-                                else
-                                    c.send(messageStr);
-                            });
-                    EASMWebSocket.printWebSocket("Updated all clients", false);
-                }
+                    try {
+                        EASMWebSocket.updateDelayData();
+                    } catch (SQLException ex) {
+                        printThrowable(ex, "Delays");
+                    }
 
-                try
-                {
-                    final JSONObject delayData = EASMWebSocket.updateDelayData();
+                    final JSONObject delayData = EASMWebSocket.getDelayData();
 
-                    if (webSocket != null)
-                    {
-                        webSocket.getConnections().stream()
-                                .filter(Objects::nonNull)
-                                .filter(WebSocket::isOpen)
-                                .filter(c -> c instanceof EASMWebSocketImpl)
-                                .map(EASMWebSocketImpl.class::cast)
-                                .filter(EASMWebSocketImpl::optDelayColouration)
-                                .filter(EASMWebSocketImpl::areasNotEmpty)
-                                .forEach(c -> c.sendDelayData(delayData));
+                    for (WebSocket ws : webSocket.getConnections()) {
+                        try {
+                            if (ws != null && ws.isOpen() && ws instanceof EASMWebSocketImpl) {
+                                EASMWebSocketImpl wsEASM = (EASMWebSocketImpl) ws;
+                                wsEASM.sendDelayData(delayData);
+                                if (!wsEASM.optMessageIDs() && wsEASM.isOpen()) {
+                                    if (wsEASM.optSplitFullMessages())
+                                        wsEASM.sendSplit(splitMessagesStr);
+                                    else
+                                        wsEASM.send(messageStr);
+                                }
+                            }
+                        } catch (Exception e) {
+                            printThrowable(e, "SendAll");
+                        }
                     }
                 }
-                catch (SQLException sqlex) { printThrowable(sqlex, "SendAll-Delays"); }
             }
             catch (Exception e) { printThrowable(e, "SendAll"); }
         }, 500, 30000, TimeUnit.MILLISECONDS);
@@ -428,10 +415,13 @@ public class NRODLight
                 logFile.createNewFile();
                 logStream = new PrintStream(new FileOutputStream(logFile, true));
 
-                ((DoublePrintStream) System.out).newFOut(logStream).flush();
-                ((DoublePrintStream) System.err).newFOut(logStream).close();
+                if (System.out instanceof DoublePrintStream)
+                    ((DoublePrintStream) System.out).newFOut(logStream).close();
+                if (System.err instanceof DoublePrintStream) {
+                    ((DoublePrintStream) System.err).newFOut(logStream).close();
+                }
             }
-            catch (IOException e) { printErr("Could not create log file"); printThrowable(e, "Logging"); }
+            catch (IOException e) { printErr("[Logging] Could not create log file"); printThrowable(e, "Logging"); }
         }
 
         logStream.println(message);
@@ -482,7 +472,7 @@ public class NRODLight
             if (oldConfig != null && oldConfig.has("WSPort") && config.has("WSPort")
                     && oldConfig.optInt("WSPort") != config.optInt("WSPort"))
             {
-                printOut("Restarting WS Server on " + config.optInt("WSPort"), true);
+                printOut("[WebSocket] Restarting WS Server on " + config.optInt("WSPort"), true);
 
                 try { webSocket.stop(0); }
                 catch (InterruptedException ignored) {}
@@ -499,14 +489,9 @@ public class NRODLight
                     TDHandler.stopLogging();
             }
 
-            /*
-            if (oldConfig != null && oldConfig.has("pause_VSTP") && config.optBoolean("pause_VSTP", false))
-            {
-                ((VSTPHandler)VSTPHandler.getInstance()).unpauseVSTPs();
-            }
-            */
+            ConnectionManager.updateSubscriptions();
         }
-        catch (IOException | JSONException ex)
+        catch (IOException | JSONException | JMSException ex)
         {
             NRODLight.printThrowable(ex, "Config");
         }
@@ -526,7 +511,7 @@ public class NRODLight
                 if (waitFor)
                     p.waitFor();
             }
-            catch (IOException | InterruptedException e) {printThrowable(e, "Emailer");}
+            catch (IOException | InterruptedException e) { printThrowable(e, "Emailer"); }
         }
     }
 

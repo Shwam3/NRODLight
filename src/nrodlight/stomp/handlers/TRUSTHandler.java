@@ -26,26 +26,12 @@ import java.util.TimeZone;
 
 public class TRUSTHandler implements MessageListener
 {
-    //private static PrintWriter logStream;
-    //private static File        logFile;
-    //private static String      lastLogDate = "";
-    private long lastMessageTime;
     private static final SimpleDateFormat cifTime = new SimpleDateFormat("HHmmss");
     private static final SimpleDateFormat cifDate = new SimpleDateFormat("yyMMdd");
 
     private static MessageListener instance;
-    private TRUSTHandler()
-    {
-        //String logDate = NRODLight.sdfDate.format(new Date());
-        //lastLogDate = logDate;
-        //logFile = new File(NRODLight.EASM_STORAGE_DIR, "Logs" + File.separator + "TRUST" + File.separator + logDate.replace("/", "-") + ".log");
-        //logFile.getParentFile().mkdirs();
+    private TRUSTHandler() {}
 
-        //try { logStream = new PrintWriter(new BufferedWriter(new FileWriter(logFile, true)), true); }
-        //catch (IOException e) { NRODLight.printThrowable(e, "TRUST"); }
-
-        lastMessageTime = System.currentTimeMillis();
-    }
     public static MessageListener getInstance()
     {
         if (instance == null)
@@ -549,35 +535,9 @@ public class TRUSTHandler implements MessageListener
         return out;
     }
 
-    //public long getTimeout() { return System.currentTimeMillis() - lastMessageTime; }
-    //public long getTimeoutThreshold() { return 30000; }
-
     private static void printTRUST(final String message)
     {
-        //if (NRODLight.verbose)
-        //{
-            NRODLight.printOut("[TRUST] " + message);
-        //}
-
-        //String newDate = NRODLight.sdfDate.format(new Date());
-        //if (!lastLogDate.equals(newDate))
-        //{
-        //    logStream.close();
-
-        //    lastLogDate = newDate;
-
-        //    logFile = new File(NRODLight.EASM_STORAGE_DIR, "Logs" + File.separator + "TRUST" + File.separator + newDate.replace("/", "-") + ".log");
-        //    logFile.getParentFile().mkdirs();
-
-        //    try
-        //    {
-        //        logFile.createNewFile();
-        //        logStream = new PrintWriter(new BufferedWriter(new FileWriter(logFile, true)), true);
-        //    }
-        //    catch (IOException e) { NRODLight.printThrowable(e, "TRUST"); }
-        //}
-
-        //logStream.println("[" + NRODLight.sdfDateTime.format(new Date(timestamp)) + "] " + message);
+        NRODLight.printOut("[TRUST] " + message);
     }
 
     @Override
@@ -595,20 +555,6 @@ public class TRUSTHandler implements MessageListener
         }
         catch (JMSException ex) { NRODLight.printThrowable(ex, "TRUST"); }
     }
-
-    /*
-    @Override
-    public void message(Map<String, String> headers, String body)
-    {
-        StompConnectionHandler.printStompHeaders(headers);
-
-        handleMessage(body, Long.parseLong(headers.getOrDefault("timestamp", "0")));
-
-        lastMessageTime = System.currentTimeMillis();
-        StompConnectionHandler.lastMessageTimeGeneral = lastMessageTime;
-        StompConnectionHandler.ack(headers.get("ack"));
-    }
-    */
 
     private long parseLong(String longStr, long defaultVal)
     {

@@ -1,5 +1,6 @@
 package nrodlight.ws;
 
+import nrodlight.NRODLight;
 import nrodlight.stomp.handlers.TDHandler;
 import org.java_websocket.WebSocketImpl;
 import org.java_websocket.WebSocketListener;
@@ -11,7 +12,6 @@ import org.json.JSONObject;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.stream.StreamSupport;
 
 public class EASMWebSocketImpl extends WebSocketImpl
 {
@@ -190,9 +190,13 @@ public class EASMWebSocketImpl extends WebSocketImpl
                 clientOptions.put("splitFullMessages", splitFullMessagesNew);
                 clientOptions.put("messageIDs", messageIDsNew);
 
-                sendAll(true);
-                if (delayColourationNew && EASMWebSocket.getDelayData() != null)
-                    sendDelayData(EASMWebSocket.getDelayData());
+                try {
+                    sendAll(true);
+                    if (delayColourationNew)
+                        sendDelayData(EASMWebSocket. getDelayData());
+                } catch (JSONException e) {
+                    NRODLight.printThrowable(e, "WebSocket");
+                }
             }
         }
         catch(WebsocketNotConnectedException e)
@@ -202,7 +206,7 @@ public class EASMWebSocketImpl extends WebSocketImpl
         }
         catch(JSONException e)
         {
-            EASMWebSocket.printWebSocket("Unrecognised message \"" + message + "\"", true);
+            EASMWebSocket.printWebSocket(String.format("Unrecognised message \"%s\": %s (%s)", message, e.getMessage(), e.getStackTrace()[0]), true);
         }
     }
 
@@ -214,16 +218,24 @@ public class EASMWebSocketImpl extends WebSocketImpl
 
     public void sendDelayData(JSONObject delayData)
     {
-        if (!optDelayColouration() || !isOpen())
+        if (!optDelayColouration() || !isOpen() || delayData == null)
             return;
 
-        JSONArray delaysDataSend = new JSONArray();
-        StreamSupport.stream(delayData.getJSONArray("message").spliterator(), false)
-                .filter(t -> StreamSupport.
-                        stream(((JSONObject) t).getJSONArray("tds").spliterator(), false)
-                        .anyMatch(o -> areas.contains(String.valueOf(o)))
-                )
-                .forEach(delaysDataSend::put);
+        long start = System.nanoTime();
+        final JSONArray delaysDataSend = new JSONArray();
+        for (final Object x : delayData.getJSONArray("message")) {
+            if (x instanceof JSONObject) {
+                final JSONObject o = (JSONObject) x;
+                final List<Object> tds = o.getJSONArray("tds").toList();
+
+                for (String area : areas) {
+                    if (tds.contains(area)) {
+                        delaysDataSend.put(o);
+                        break;
+                    }
+                }
+            }
+        }
 
         JSONObject content = new JSONObject();
         content.put("type", "DELAYS");
@@ -234,6 +246,14 @@ public class EASMWebSocketImpl extends WebSocketImpl
 
         JSONObject message = new JSONObject();
         message.put("Message", content);
-        send(message.toString());
+
+        if (NRODLight.verbose)
+            EASMWebSocket.printWebSocket(String.format("Constructing delay packet took %.2fms", (System.nanoTime() - start) / 1000000d), false);
+
+        try
+        {
+            if (isOpen())
+                send(message.toString());
+        } catch (WebsocketNotConnectedException ignored) {}
     }
 }

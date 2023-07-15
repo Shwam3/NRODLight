@@ -20,8 +20,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class TDHandler implements MessageListener
 {
-    private long lastMessageTime;
-
     private static PrintWriter logStream;
     private static File logFile;
     private static String lastLogDate = "";
@@ -35,8 +33,6 @@ public class TDHandler implements MessageListener
             startLogging();
 
         saveTDData(DATA_MAP);
-
-        lastMessageTime = System.currentTimeMillis();
     }
     public static MessageListener getInstance()
     {
@@ -145,13 +141,13 @@ public class TDHandler implements MessageListener
                 }
                 else if ("SF_MSG".equals(msgType))
                 {
-                    final char[] data = zfill(Integer.toBinaryString(Integer.parseInt(indvMsg.getString("data"), 16)), 8).toCharArray();
+                    final int data = Integer.parseInt(indvMsg.getString("data"), 16);
                     timestamps.add(time);
 
-                    for (int i = 0; i < data.length; i++)
+                    for (int i = 0; i < 8; i++)
                     {
-                        final String address = indvMsg.getString("area_id") + indvMsg.optString("address") + ":" + (8 - i);
-                        final String dataBit = String.valueOf(data[i]);
+                        final String address = indvMsg.getString("area_id") + indvMsg.optString("address") + ":" + (i + 1);
+                        final String dataBit = ((data >> i) & 1) == 1 ? "1" : "0";
                         final String oldVal = updateMap.getOrDefault(address, DATA_MAP.get(address));
 
                         if (!DATA_MAP.containsKey(address) || !dataBit.equals(oldVal))
@@ -166,19 +162,17 @@ public class TDHandler implements MessageListener
                 }
                 else if ("SG_MSG".equals(msgType) || "SH_MSG".equals(msgType))
                 {
-                    final String bitField = zfill(Long.toBinaryString(Long.parseLong(indvMsg.getString("data"), 16)), 32);
                     final int start = Integer.parseInt(indvMsg.getString("address"), 16);
                     timestamps.add(time);
 
                     for (int i = 0; i < 4; i++)
+                    {
+                        final int bitField = Integer.parseInt(indvMsg.getString("data").substring(i * 2, i * 2 + 2), 16);
+                        final String byteAddress = indvMsg.getString("area_id") + (start + i < 0x10 ? "0" : "") + Integer.toHexString(start + i).toUpperCase() + ":";
                         for (int j = 0; j < 8; j++)
                         {
-                            final String address = String.format("%s%s:%s",
-                                    indvMsg.getString("area_id"),
-                                    zfill(Integer.toHexString(start+i), 2),
-                                    8 - j
-                            ).toUpperCase();
-                            final String dataBit = String.valueOf(bitField.charAt(8 * i + j));
+                            final String address = byteAddress + (j + 1);
+                            final String dataBit = ((bitField >> j) & 1) == 1 ? "1" : "0";
                             final String oldVal = updateMap.getOrDefault(address, DATA_MAP.get(address));
 
                             if (!DATA_MAP.containsKey(address) || !dataBit.equals(oldVal))
@@ -190,6 +184,7 @@ public class TDHandler implements MessageListener
                             }
                             updateMap.put(address, dataBit);
                         }
+                    }
                 }
 
                 tdCounts.put(indvMsg.getString("area_id"), tdCounts.getOrDefault(indvMsg.getString("area_id"), 0L) + updateCountEvent);
@@ -271,11 +266,6 @@ public class TDHandler implements MessageListener
         }
     }
 
-    private static String zfill(String s, int len)
-    {
-        return String.format("%"+len+"s", s).replace(" ", "0");
-    }
-
     private static void saveTDData(final Map<String, String> mapToSave)
     {
         final File TDDataDir = new File(NRODLight.EASM_STORAGE_DIR, "TDData");
@@ -322,9 +312,6 @@ public class TDHandler implements MessageListener
             });
         }
     }
-
-    //public long getTimeout() { return System.currentTimeMillis() - lastMessageTime; }
-    //public long getTimeoutThreshold() { return 30000; }
 
     public static void printTD(String message, long timestamp)
     {
@@ -452,18 +439,4 @@ public class TDHandler implements MessageListener
         }
         catch (JMSException ex) { NRODLight.printThrowable(ex, "TD"); }
     }
-
-    /*
-    @Override
-    public void message(Map<String, String> headers, String body)
-    {
-        StompConnectionHandler.printStompHeaders(headers);
-
-        handleMessage(body, Long.parseLong(headers.getOrDefault("timestamp", "0")));
-
-        lastMessageTime = System.currentTimeMillis();
-        StompConnectionHandler.lastMessageTimeGeneral = lastMessageTime;
-        StompConnectionHandler.ack(headers.get("ack"));
-    }
-    */
 }

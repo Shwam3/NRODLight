@@ -16,7 +16,7 @@ public class DBHandler
         {
             if (conn != null)
             {
-                NRODLight.printOut("Database connection invalid, reconnecting...");
+                NRODLight.printOut("[Database] Database connection invalid, reconnecting...");
                 conn.close();
             }
             conn = DriverManager.getConnection("jdbc:mariadb://" + NRODLight.config.getString("DBLocation") + "?rewriteBatchedStatements=true",

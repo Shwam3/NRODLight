@@ -22,10 +22,6 @@ public class VSTPHandler implements MessageListener
     private static PrintWriter logStream;
     private static File        logFile;
     private static String      lastLogDate = "";
-    private        long        lastMessageTime;
-
-    //private PrintWriter pausedVSTPWriter = null;
-    //private final  File  pausedVSTPFile;
 
     private static MessageListener instance;
     private VSTPHandler()
@@ -36,11 +32,6 @@ public class VSTPHandler implements MessageListener
 
         try { logStream = new PrintWriter(new BufferedWriter(new FileWriter(logFile, true)), true); }
         catch (IOException e) { NRODLight.printThrowable(e, "VSTP"); }
-
-        //pausedVSTPFile = new File(logFile.getParentFile(), "paused_vstps.log");
-        //unpauseVSTPs();
-
-        lastMessageTime = System.currentTimeMillis();
     }
     public static MessageListener getInstance()
     {
@@ -55,24 +46,7 @@ public class VSTPHandler implements MessageListener
         JSONObject msg = new JSONObject(message).getJSONObject("VSTPCIFMsgV1");
         printVSTP(message, !msg.has("timestamp"), Long.parseLong(msg.optString("timestamp", "0")));
 
-        /*
-        if (NRODLight.config.optBoolean("pause_VSTP", false))
-        {
-            if (pausedVSTPWriter == null)
-            {
-                try
-                {
-                    pausedVSTPWriter = new PrintWriter(new BufferedWriter(new FileWriter(pausedVSTPFile, true)), true);
-                }
-                catch (IOException e) { NRODLight.printThrowable(e, "VSTP"); }
-            }
-            pausedVSTPWriter.println(message);
-        }
-        else
-        {
-        */
-            handleVSTP(message);
-        //}
+        handleVSTP(message);
 
         RateMonitor.getInstance().onVSTPMessage(
                 (System.currentTimeMillis() - timestamp) / 1000d,
@@ -331,7 +305,7 @@ public class VSTPHandler implements MessageListener
                                     "schedule_location").length() + " locations"));
 
             printVSTP(errorMsg, true, msg.optLong("timestamp", 0L));
-            NRODLight.printErr(errorMsg);
+            NRODLight.printErr("[VSTP] " + errorMsg);
             NRODLight.printThrowable(ex, "VSTP");
         }
         catch (JSONException ex)
@@ -340,15 +314,12 @@ public class VSTPHandler implements MessageListener
         }
     }
 
-    //public long getTimeout() { return System.currentTimeMillis() - lastMessageTime; }
-    //public long getTimeoutThreshold() { return 14400000; }
-
     private static void printVSTP(final String message, final boolean toErr, final long timestamp)
     {
         if (NRODLight.verbose)
         {
             if (toErr)
-                NRODLight.printErr("[VSTP] !!!> " + message + " <!!!");
+                NRODLight.printErr("[VSTP] " + message);
             else
                 NRODLight.printOut("[VSTP] " + message);
         }
@@ -391,39 +362,6 @@ public class VSTPHandler implements MessageListener
         return date.substring(2).replace("-","");
     }
 
-    /*
-    public void unpauseVSTPs()
-    {
-        if (pausedVSTPWriter != null || pausedVSTPFile.exists())
-        {
-            if (pausedVSTPWriter != null)
-                pausedVSTPWriter.close();
-            pausedVSTPWriter = null;
-
-            boolean failed = false;
-            try (BufferedReader br = new BufferedReader(new FileReader(pausedVSTPFile)))
-            {
-                String line;
-                while ((line = br.readLine()) != null)
-                {
-                    try { handleVSTP(line); }
-                    catch (JSONException ignored) {}
-                }
-            }
-            catch (IOException e)
-            {
-                failed = true;
-                NRODLight.printThrowable(e, "VSTP");
-            }
-            finally
-            {
-                if (!failed)
-                    pausedVSTPFile.delete();
-            }
-        }
-    }
-    */
-
     @Override
     public void onMessage(Message msg)
     {
@@ -439,18 +377,4 @@ public class VSTPHandler implements MessageListener
         }
         catch (JMSException ex) { NRODLight.printThrowable(ex, "VSTP"); }
     }
-
-    /*
-    @Override
-    public void message(Map<String, String> headers, String body)
-    {
-        StompConnectionHandler.printStompHeaders(headers);
-
-        handleMessage(body, Long.parseLong(headers.getOrDefault("timestamp", "0")));
-
-        lastMessageTime = System.currentTimeMillis();
-        StompConnectionHandler.lastMessageTimeGeneral = lastMessageTime;
-        StompConnectionHandler.ack(headers.get("ack"));
-    }
-    */
 }
