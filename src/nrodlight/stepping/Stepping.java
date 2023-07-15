@@ -80,11 +80,12 @@ public class Stepping
                     final String from = instructions[1];
                     final String to = instructions[2];
                     final String descr = TDHandler.DATA_MAP.getOrDefault(from, "");
+                    final String oldVal = TDHandler.DATA_MAP.getOrDefault(to, "");
 
                     updateMap.put(from, "");
                     updateMap.put(to, descr);
 
-                    TDHandler.printTD(String.format("CA %s %s %s", descr, from, to), time);
+                    TDHandler.printTD(String.format("CA %s %s %s%s", descr, from, to, oldVal.isEmpty() ? "" : (" " + oldVal)), time);
                 }
                 else
                     NRODLight.printErr("[Stepping] Failed to carry out step: " + step);
@@ -108,9 +109,9 @@ public class Stepping
             case "INTERPOSE":
                 if (instructions.length >= 3 && instructions[1].length() == 6 && instructions[2].length() == 4)
                 {
-                    final String to = TDHandler.DATA_MAP.getOrDefault(instructions[1], "");
-                    final String descr = TDHandler.DATA_MAP.getOrDefault(instructions[1], "");
-                    final String oldVal = TDHandler.DATA_MAP.getOrDefault(instructions[1], "");
+                    final String to = instructions[1];
+                    final String descr = instructions[2];
+                    final String oldVal = TDHandler.DATA_MAP.getOrDefault(to, "");
 
                     updateMap.put(instructions[1], instructions[2]);
 
