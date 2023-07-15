@@ -3,6 +3,7 @@ package nrodlight.ws;
 import org.java_websocket.drafts.Draft;
 import org.java_websocket.drafts.Draft_6455;
 import org.java_websocket.exceptions.InvalidHandshakeException;
+import org.java_websocket.extensions.permessage_deflate.PerMessageDeflateExtension;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.handshake.HandshakeBuilder;
 import org.java_websocket.handshake.ServerHandshakeBuilder;
@@ -11,7 +12,10 @@ public class EASMDraft_6455 extends Draft_6455
 {
     public EASMDraft_6455()
     {
-        super();
+        super(new PerMessageDeflateExtension());
+
+        PerMessageDeflateExtension pmde = (PerMessageDeflateExtension) getExtension();
+        pmde.setClientNoContextTakeover(false);
     }
 
     @Override
