@@ -5,6 +5,7 @@ import nrodlight.db.Queries;
 import org.json.JSONObject;
 
 import java.sql.PreparedStatement;
+import java.sql.Types;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -78,7 +79,10 @@ public class RateMonitor
                         {
                             List<Double> values = new ArrayList<>(averageMap.get(columns[i]));
                             averageMap.get(columns[i]).clear();
-                            ps.setInt(2 + i, (int) Math.floor(values.stream().mapToLong(v -> (long) (v * 1000)).average().orElse(0)));
+                            if (values.isEmpty())
+                                ps.setNull(2 + i, Types.INTEGER);
+                            else
+                                ps.setInt(2 + i, (int) Math.floor(values.stream().mapToLong(v -> (long) (v * 1000)).average().orElse(0)));
                         }
                     }
 
