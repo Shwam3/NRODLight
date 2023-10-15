@@ -12,18 +12,18 @@ public class Condition
     private static final Map<String, Condition> cache = new HashMap<>();
     static { cache.put("", TRUE); }
 
-    public static boolean parse(String condStr)
+    public static boolean parse(String condStr, String interpose)
     {
         condStr = condStr.trim();
 
         if (cache.containsKey(condStr))
-            return cache.get(condStr).evaluate();
+            return cache.get(condStr).evaluate(interpose);
 
         try
         {
             Condition cond = new Condition(condStr);
             cache.put(condStr, cond);
-            return cond.evaluate();
+            return cond.evaluate(interpose);
         }
         catch (Exception e)
         {
@@ -42,9 +42,9 @@ public class Condition
         this.expression = new Parser(expression).build();
     }
 
-    private boolean evaluate()
+    private boolean evaluate(final String interpose)
     {
-        return expression.evaluate();
+        return expression.evaluate(interpose);
     }
 
     @Override

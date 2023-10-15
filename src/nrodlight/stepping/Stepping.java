@@ -52,19 +52,24 @@ public class Stepping
 
     public static Map<String, String> processEvent(JSONObject event)
     {
+        return processEvent(event, null);
+    }
+
+    public static Map<String, String> processEvent(JSONObject event, String interpose)
+    {
         Map<String, String> updateMap = new HashMap<>();
 
         List<JSONObject> triggeredSteps = steps.getOrDefault(event.getString("event"), Collections.emptyList());
         if (!triggeredSteps.isEmpty())
-            triggeredSteps.stream().filter(Stepping::cond).forEach(s -> step(s, event, updateMap));
+            triggeredSteps.stream().filter(step -> cond(step, interpose)).forEach(s -> step(s, event, updateMap));
 
         return updateMap;
     }
 
-    private static boolean cond(JSONObject step)
+    private static boolean cond(JSONObject step, String interpose)
     {
         String cond = step.getString("if");
-        return Condition.parse(cond);
+        return Condition.parse(cond, interpose);
     }
 
     private static void step(JSONObject step, JSONObject event, Map<String, String> updateMap)

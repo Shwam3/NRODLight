@@ -4,9 +4,9 @@ public class Operators
 {
     public static class And extends NonTerminal
     {
-        public boolean evaluate()
+        public boolean evaluate(String interpose)
         {
-            return left.evaluate() && right.evaluate();
+            return left.evaluate(interpose) && right.evaluate(interpose);
         }
 
         public String toString()
@@ -17,9 +17,9 @@ public class Operators
 
     public static class Or extends NonTerminal
     {
-        public boolean evaluate()
+        public boolean evaluate(String interpose)
         {
-            return left.evaluate() || right.evaluate();
+            return left.evaluate(interpose) || right.evaluate(interpose);
         }
 
         public String toString()
@@ -40,9 +40,9 @@ public class Operators
             throw new UnsupportedOperationException();
         }
 
-        public boolean evaluate()
+        public boolean evaluate(String interpose)
         {
-            return !left.evaluate();
+            return !left.evaluate(interpose);
         }
 
         public String toString()
@@ -59,7 +59,7 @@ public class Operators
             super("TRUE");
         }
 
-        public boolean evaluate()
+        public boolean evaluate(String interpose)
         {
             return true;
         }
@@ -73,7 +73,7 @@ public class Operators
             super("FALSE");
         }
 
-        public boolean evaluate()
+        public boolean evaluate(String interpose)
         {
             return false;
         }

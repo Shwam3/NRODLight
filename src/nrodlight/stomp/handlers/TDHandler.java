@@ -88,14 +88,14 @@ public class TDHandler implements MessageListener
                     final String descr = indvMsg.getString("descr");
                     final String oldVal = updateMap.getOrDefault(to, DATA_MAP.getOrDefault(to, ""));
 
+                    printTD(String.format("CA %s %s %s%s", descr, from, to, oldVal.isEmpty() ? "" : (" " + oldVal)), time);
                     updateMap.put(from, "");
                     updateMap.put(to, descr);
-                    updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CA %s %s\",\"descr\":\"%s\",\"time\":%s}", from, to, descr, time))));
-                    updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CA * %s\",\"descr\":\"%s\",\"time\":%s}", to, descr, time))));
-                    updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CA %s *\",\"descr\":\"%s\",\"time\":%s}", from, descr, time))));
+                    updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CA %s %s\",\"descr\":\"%s\",\"time\":%s}", from, to, descr, time)), descr));
+                    updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CA * %s\",\"descr\":\"%s\",\"time\":%s}", to, descr, time)), descr));
+                    updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CA %s *\",\"descr\":\"%s\",\"time\":%s}", from, descr, time)), descr));
 
                     timestamps.add(time);
-                    printTD(String.format("CA %s %s %s%s", descr, from, to, oldVal.isEmpty() ? "" : (" " + oldVal)), time);
                     updateCountEvent++;
                 }
                 else if ("CB_MSG".equals(msgType)) // Cancel
@@ -103,11 +103,11 @@ public class TDHandler implements MessageListener
                     final String from = indvMsg.getString("area_id") + indvMsg.getString("from");
                     final String descr = indvMsg.getString("descr");
 
+                    printTD(String.format("CB %s %s", descr, from), time);
                     updateMap.put(from, "");
                     updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CB %s\",\"descr\":\"%s\",\"time\":%s}", from, descr, time))));
 
                     timestamps.add(time);
-                    printTD(String.format("CB %s %s", descr, from), time);
                     updateCountEvent++;
                 }
                 else if ("CC_MSG".equals(msgType)) // Interpose
@@ -116,11 +116,11 @@ public class TDHandler implements MessageListener
                     final String descr = indvMsg.getString("descr");
                     final String oldVal = updateMap.getOrDefault(to, DATA_MAP.getOrDefault(to, ""));
 
+                    printTD(String.format("CC %s %s%s", descr, to, oldVal.isEmpty() ? "" : (" " + oldVal)), time);
                     updateMap.put(to, descr);
-                    updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CC %s\",\"descr\":\"%s\",\"oldVal\":\"%s\",\"time\":%s}", to, descr, oldVal, time))));
+                    updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CC %s\",\"descr\":\"%s\",\"oldVal\":\"%s\",\"time\":%s}", to, descr, oldVal, time)), descr));
 
                     timestamps.add(time);
-                    printTD(String.format("CC %s %s%s", descr, to, oldVal.isEmpty() ? "" : (" " + oldVal)), time);
                     updateCountEvent++;
                 }
                 else if ("CT_MSG".equals(msgType))
@@ -130,12 +130,12 @@ public class TDHandler implements MessageListener
                     final String report = indvMsg.getString("report_time");
                     final String oldVal = updateMap.getOrDefault(address, DATA_MAP.getOrDefault(address, ""));
 
+                    printTD(String.format("CT %s %s", area, report), time);
                     updateMap.put(address, report);
-                    updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CC %s\",\"descr\":\"%s\",\"oldVal\":\"%s\",\"time\":%s}", address, report, oldVal, time))));
+                    updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CC %s\",\"descr\":\"%s\",\"oldVal\":\"%s\",\"time\":%s}", address, report, oldVal, time)), report));
                     updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CT %s\",\"descr\":\"%s\",\"time\":%s}", area, report, time))));
 
                     timestamps.add(time);
-                    printTD(String.format("CT %s %s", area, report), time);
                     updateCountEvent++;
                     heartbeatCount++;
                 }
@@ -152,12 +152,10 @@ public class TDHandler implements MessageListener
 
                         if (!DATA_MAP.containsKey(address) || !dataBit.equals(oldVal))
                         {
-                            updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"%s %s\",\"time\":%s}", "1".equals(dataBit) ? "SET" : "UNSET", address, time))));
-
                             printTD(String.format("SF %s %s %s", address, oldVal == null ? "0" : oldVal, dataBit), time);
+                            updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"%s %s\",\"time\":%s}", "1".equals(dataBit) ? "SET" : "UNSET", address, time))));
                             updateCountEvent++;
                         }
-                        updateMap.put(address, dataBit);
                     }
                 }
                 else if ("SG_MSG".equals(msgType) || "SH_MSG".equals(msgType))
@@ -175,14 +173,13 @@ public class TDHandler implements MessageListener
                             final String dataBit = ((bitField >> j) & 1) == 1 ? "1" : "0";
                             final String oldVal = updateMap.getOrDefault(address, DATA_MAP.get(address));
 
+                            updateMap.put(address, dataBit);
                             if (!DATA_MAP.containsKey(address) || !dataBit.equals(oldVal))
                             {
-                                updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"%s %s\",\"time\":%s}", "1".equals(dataBit) ? "SET" : "UNSET", address, time))));
-
                                 printTD(String.format("%s %s %s %s", indvMsg.get("msg_type"), address, oldVal == null ? "0" : oldVal, dataBit), time);
+                                updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"%s %s\",\"time\":%s}", "1".equals(dataBit) ? "SET" : "UNSET", address, time))));
                                 updateCountEvent++;
                             }
-                            updateMap.put(address, dataBit);
                         }
                     }
                 }

@@ -11,6 +11,6 @@ public abstract class Terminal implements BooleanExpression
 
     public String toString()
     {
-        return String.format("%s=%s", value, evaluate());
+        return String.format("%s=%s", value, evaluate(""));
     }
 }

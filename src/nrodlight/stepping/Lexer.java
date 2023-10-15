@@ -33,6 +33,8 @@ public class Lexer
         input.wordChars('A', 'Z');
         input.wordChars('0', '9');
         input.wordChars(':', ':');
+        input.wordChars('$', '$');
+        input.wordChars('_', '_');
         input.wordChars('*', '*');
         input.wordChars('-', '-');
         input.wordChars('=', '=');

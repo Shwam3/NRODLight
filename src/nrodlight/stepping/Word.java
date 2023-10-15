@@ -24,16 +24,18 @@ public class Word extends Terminal
     }
 
     @Override
-    public boolean evaluate()
+    public boolean evaluate(String interpose)
     {
         if (isExpression)
         {
             String[] values = value.split("=");
-            return evaluateOne(values[0]).equals(evaluateOne(values[1]));
+            return evaluateOne(values[0], interpose).equals(evaluateOne(values[1], interpose));
         }
         else
         {
             String state = TDHandler.DATA_MAP.get(value);
+            if ("$_THIS".equals(value))
+                state = interpose;
             if (state == null)
                 return false;
             else if ("0".equals(state))
@@ -45,12 +47,14 @@ public class Word extends Terminal
         }
     }
 
-    private String evaluateOne(String value)
+    private String evaluateOne(String value, String interpose)
     {
         if (value.charAt(0) == '\'' && value.charAt(5) == '\'')
             return value.substring(1, 5);
 
         String state = TDHandler.DATA_MAP.get(value);
+        if ("$_THIS".equals(value))
+            state = interpose;
         if (state == null)
             return "0";
         else if ("0".equals(state))
