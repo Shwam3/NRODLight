@@ -15,8 +15,12 @@ import javax.jms.Message;
 import javax.jms.MessageListener;
 import javax.jms.TextMessage;
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class TDHandler implements MessageListener
 {
@@ -32,7 +36,7 @@ public class TDHandler implements MessageListener
         if (NRODLight.config.optBoolean("TDLogging", false))
             startLogging();
 
-        saveTDData(DATA_MAP);
+        saveTDData(null);
     }
     public static MessageListener getInstance()
     {
@@ -42,12 +46,17 @@ public class TDHandler implements MessageListener
         return instance;
     }
 
-    public static final Map<String, String> DATA_MAP = new ConcurrentHashMap<>();
+    public static final Map<String, String> DATA_MAP = new ConcurrentSkipListMap<>(
+            Comparator.<String, String>comparing(a -> a.substring(0, 2)) // Sort by area, then C/S class, then ID
+            .thenComparing(a -> a.charAt(4) == ':')
+            .thenComparing(a -> a.substring(2, 6))
+    );
 
     public void handleMessage(final String body, final long timestamp)
     {
         JSONArray messageList = new JSONArray(body);
         Map<String, String> updateMap = new HashMap<>();
+        Set<String> modifiedAreas = new HashSet<>();
         long updateCount = 0L;
         long heartbeatCount = 0L;
         List<Long> timestamps = new ArrayList<>(messageList.length());
@@ -94,6 +103,7 @@ public class TDHandler implements MessageListener
                     updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CA %s %s\",\"descr\":\"%s\",\"time\":%s}", from, to, descr, time)), descr));
                     updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CA * %s\",\"descr\":\"%s\",\"time\":%s}", to, descr, time)), descr));
                     updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CA %s *\",\"descr\":\"%s\",\"time\":%s}", from, descr, time)), descr));
+                    modifiedAreas.add(indvMsg.getString("area_id"));
 
                     timestamps.add(time);
                     updateCountEvent++;
@@ -106,6 +116,7 @@ public class TDHandler implements MessageListener
                     printTD(String.format("CB %s %s", descr, from), time);
                     updateMap.put(from, "");
                     updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CB %s\",\"descr\":\"%s\",\"time\":%s}", from, descr, time))));
+                    modifiedAreas.add(indvMsg.getString("area_id"));
 
                     timestamps.add(time);
                     updateCountEvent++;
@@ -119,6 +130,7 @@ public class TDHandler implements MessageListener
                     printTD(String.format("CC %s %s%s", descr, to, oldVal.isEmpty() ? "" : (" " + oldVal)), time);
                     updateMap.put(to, descr);
                     updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CC %s\",\"descr\":\"%s\",\"oldVal\":\"%s\",\"time\":%s}", to, descr, oldVal, time)), descr));
+                    modifiedAreas.add(indvMsg.getString("area_id"));
 
                     timestamps.add(time);
                     updateCountEvent++;
@@ -134,6 +146,7 @@ public class TDHandler implements MessageListener
                     updateMap.put(address, report);
                     updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CC %s\",\"descr\":\"%s\",\"oldVal\":\"%s\",\"time\":%s}", address, report, oldVal, time)), report));
                     updateMap.putAll(Stepping.processEvent(new JSONObject(String.format("{\"event\":\"CT %s\",\"descr\":\"%s\",\"time\":%s}", area, report, time))));
+                    modifiedAreas.add("XX");
 
                     timestamps.add(time);
                     updateCountEvent++;
@@ -150,6 +163,8 @@ public class TDHandler implements MessageListener
                         final String dataBit = ((data >> i) & 1) == 1 ? "1" : "0";
                         final String oldVal = updateMap.getOrDefault(address, DATA_MAP.get(address));
 
+                        updateMap.put(address, dataBit);
+                        modifiedAreas.add(indvMsg.getString("area_id"));
                         if (!DATA_MAP.containsKey(address) || !dataBit.equals(oldVal))
                         {
                             printTD(String.format("SF %s %s %s", address, oldVal == null ? "0" : oldVal, dataBit), time);
@@ -174,6 +189,7 @@ public class TDHandler implements MessageListener
                             final String oldVal = updateMap.getOrDefault(address, DATA_MAP.get(address));
 
                             updateMap.put(address, dataBit);
+                            modifiedAreas.add(indvMsg.getString("area_id"));
                             if (!DATA_MAP.containsKey(address) || !dataBit.equals(oldVal))
                             {
                                 printTD(String.format("%s %s %s %s", indvMsg.get("msg_type"), address, oldVal == null ? "0" : oldVal, dataBit), time);
@@ -192,7 +208,7 @@ public class TDHandler implements MessageListener
 
         DATA_MAP.putAll(updateMap);
         updateClients(updateMap);
-        saveTDData(updateMap);
+        saveTDData(modifiedAreas);
 
         RateMonitor.getInstance().onTDMessage(
                 (System.currentTimeMillis() - timestamp) / 1000d,
@@ -202,7 +218,7 @@ public class TDHandler implements MessageListener
 
     public static void updateClientsAndSave(Map<String, String> updateMap)
     {
-        Map<String, String> saveMap = new HashMap<>(updateMap);
+        Set<String> modifiedAreas = new HashSet<>();
         for (Iterator<Map.Entry<String, String>> iter = updateMap.entrySet().iterator(); iter.hasNext(); )
         {
             Map.Entry<String, String> pair = iter.next();
@@ -210,17 +226,16 @@ public class TDHandler implements MessageListener
             {
                 String key = pair.getKey();
                 DATA_MAP.remove(key);
-                saveMap.put(key, key.charAt(4) == ':' ? "0" : "");
                 iter.remove(); //updateMap.remove(pair.getKey());
             }
+            modifiedAreas.add(pair.getKey().substring(0, 2));
         }
         if (!updateMap.isEmpty())
         {
             DATA_MAP.putAll(updateMap);
             updateClients(updateMap);
         }
-        if (!saveMap.isEmpty())
-            saveTDData(saveMap);
+        saveTDData(modifiedAreas);
     }
 
     private static void updateClients(Map<String, String> updateMap)
@@ -263,50 +278,56 @@ public class TDHandler implements MessageListener
         }
     }
 
-    private static void saveTDData(final Map<String, String> mapToSave)
+    @SuppressWarnings("unchecked")
+    public static void saveTDData(final Set<String> areasToSave)
     {
-        final File TDDataDir = new File(NRODLight.EASM_STORAGE_DIR, "TDData");
-        if (!mapToSave.isEmpty())
+        //long start = System.nanoTime();
+        if (areasToSave == null || !areasToSave.isEmpty())
         {
+            final File TDDataDir = new File(NRODLight.EASM_STORAGE_DIR, "TDData");
             if (!TDDataDir.exists())
                 TDDataDir.mkdirs();
 
-            final JSONObject cClObj = new JSONObject();
-            final JSONObject sClObj = new JSONObject();
+            String lastArea = "";
+            StringBuilder lines = new StringBuilder();
+            AtomicInteger count = new AtomicInteger();
+            for (Map.Entry<String, String> entry : DATA_MAP.entrySet()) {
+                String id = entry.getKey();
+                String val = entry.getValue();
+                String area = id.substring(0, 2);
 
-            mapToSave.forEach((k, v) -> ("0".equals(v) || "1".equals(v) ? sClObj : cClObj).put(k.substring(0, 2), new JSONObject()));
+                if (areasToSave == null || areasToSave.contains(area)) {
+                    if (lastArea.isEmpty()) {
+                        lastArea = area;
+                    }
 
-            DATA_MAP.forEach((k, v) ->
-            {
-                String area = k.substring(0, 2);
-                if ("0".equals(v) || "1".equals(v))
-                {
-                    if (sClObj.has(area))
-                        sClObj.getJSONObject(area).put(k, v);
+                    if (!area.equals(lastArea)) {
+                        try {
+                            lines.insert(0, '\n').insert(0, count.getAndSet(0));
+                            File newFile = new File(TDDataDir, lastArea + ".td.new");
+                            Files.writeString(newFile.toPath(), lines.toString(), StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
+                            Files.move(newFile.toPath(), new File(TDDataDir, lastArea + ".td").toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                        } catch (IOException ex) {
+                            NRODLight.printThrowable(ex, "TD");
+                        }
+                        lines.setLength(0);
+                    }
+                    lines.append(id).append('\t').append(val).append('\n');
+                    count.incrementAndGet();
                 }
-                else
-                {
-                    if (cClObj.has(area))
-                        cClObj.getJSONObject(area).put(k, v);
-                }
-            });
+                lastArea = area;
+            }
 
-            sClObj.keys().forEachRemaining(k ->
-            {
-                try(BufferedWriter bw = new BufferedWriter(new FileWriter(new File(TDDataDir, k+".s.td"))))
-                {
-                    sClObj.getJSONObject(k).write(bw);
+            if (count.get() > 0 && (areasToSave == null || areasToSave.contains(lastArea))) {
+                try {
+                    lines.insert(0, '\n').insert(0, count.getAndSet(0));
+                    File newFile = new File(TDDataDir, lastArea + ".td.new");
+                    Files.writeString(newFile.toPath(), lines.toString(), StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
+                    Files.move(newFile.toPath(), new File(TDDataDir, lastArea + ".td").toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                } catch (IOException ex) {
+                    NRODLight.printThrowable(ex, "TD");
                 }
-                catch (IOException ex) { NRODLight.printThrowable(ex, "TD"); }
-            });
-            cClObj.keys().forEachRemaining(k ->
-            {
-                try(BufferedWriter bw = new BufferedWriter(new FileWriter(new File(TDDataDir, k+".c.td"))))
-                {
-                    cClObj.getJSONObject(k).write(bw);
-                }
-                catch (IOException ex) { NRODLight.printThrowable(ex, "TD"); }
-            });
+            }
         }
     }
 
@@ -381,45 +402,6 @@ public class TDHandler implements MessageListener
         if (ls != null)
             ls.close();
     }
-
-    /*
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    public static void main(String[] args)
-    {
-        NRODLight.EASM_STORAGE_DIR = new File("D:\\Shwam\\Documents\\GitHub\\NRODLight\\sigmaps");
-        String logDate = NRODLight.sdfDate.format(new Date());
-        NRODLight.logFile = new File(NRODLight.EASM_STORAGE_DIR, "Logs" + File.separator + "NRODLight" + File.separator + logDate.replace("/", "-") + ".log");
-        NRODLight.logFile.getParentFile().mkdirs();
-        NRODLight.lastLogDate = logDate;
-
-        try
-        {
-            NRODLight.logStream = new PrintStream(new FileOutputStream(NRODLight.logFile, NRODLight.logFile.length() > 0), true);
-            System.setOut(new DoublePrintStream(System.out, NRODLight.logStream));
-            System.setErr(new DoublePrintStream(System.err, NRODLight.logStream));
-        }
-        catch (FileNotFoundException e) { NRODLight.printErr("Could not create log file"); NRODLight.printThrowable(e, "Startup"); }
-
-        TDHandler tdh = (TDHandler) getInstance();
-
-        Map<String, String> headers = new HashMap(new JSONObject("{}").toMap());
-        TDHandler.startLogging();
-        tdh.message(
-                 headers,
-                "[{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"X7\",\"time\":\"1657126531000\",\"address\":\"24\",\"data\":\"06\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"R3\",\"time\":\"1657126531000\",\"address\":\"07\",\"data\":\"00\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"WY\",\"time\":\"1657126530000\",\"address\":\"1E\",\"data\":\"00\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"X0\",\"time\":\"1657126531000\",\"address\":\"66\",\"data\":\"0F\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"SV\",\"time\":\"1657126531000\",\"address\":\"08\",\"data\":\"EB\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"ZB\",\"time\":\"1657126531000\",\"address\":\"07\",\"data\":\"08\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"EA\",\"time\":\"1657126531000\",\"from\":\"P601\",\"to\":\"P609\",\"descr\":\"2Y11\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"NK\",\"time\":\"1657126531000\",\"address\":\"50\",\"data\":\"1F\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"EB\",\"time\":\"1657126531000\",\"from\":\"P601\",\"to\":\"P609\",\"descr\":\"2Y11\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"R2\",\"time\":\"1657126531000\",\"address\":\"11\",\"data\":\"7F\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"ZG\",\"time\":\"1657126531000\",\"from\":\"EW24\",\"to\":\"EW22\",\"descr\":\"1P60\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"R3\",\"time\":\"1657126531000\",\"address\":\"1B\",\"data\":\"F8\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"U3\",\"time\":\"1657126531000\",\"address\":\"29\",\"data\":\"C8\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"C2\",\"time\":\"1657126531000\",\"address\":\"7E\",\"data\":\"0A\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"EK\",\"time\":\"1657126531000\",\"address\":\"50\",\"data\":\"F6\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"X0\",\"time\":\"1657126531000\",\"address\":\"6B\",\"data\":\"C0\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"M1\",\"time\":\"1657126531000\",\"from\":\"0044\",\"to\":\"0010\",\"descr\":\"1L17\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"Q4\",\"time\":\"1657126531000\",\"address\":\"21\",\"data\":\"20\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"X3\",\"time\":\"1657126531000\",\"address\":\"4A\",\"data\":\"40\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"EB\",\"time\":\"1657126531000\",\"from\":\"S684\",\"to\":\"S686\",\"descr\":\"1D57\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"Q0\",\"time\":\"1657126531000\",\"address\":\"0A\",\"data\":\"A0\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"T2\",\"time\":\"1657126531000\",\"address\":\"4A\",\"data\":\"00\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"R3\",\"time\":\"1657126531000\",\"address\":\"1B\",\"data\":\"F8\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"DA\",\"time\":\"1657126531000\",\"address\":\"22\",\"data\":\"02\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"M3\",\"time\":\"1657126531000\",\"address\":\"0B\",\"data\":\"B0\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"Q3\",\"time\":\"1657126531000\",\"address\":\"58\",\"data\":\"BC\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"YO\",\"time\":\"1657126531000\",\"address\":\"06\",\"data\":\"00\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"D9\",\"time\":\"1657126531000\",\"address\":\"33\",\"data\":\"C6\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"Y9\",\"time\":\"1657126531000\",\"address\":\"10\",\"data\":\"10\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"M4\",\"time\":\"1657126531000\",\"address\":\"08\",\"data\":\"59\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"Q0\",\"time\":\"1657126531000\",\"from\":\"0142\",\"to\":\"146B\",\"descr\":\"9U49\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"Q2\",\"time\":\"1657126531000\",\"from\":\"0491\",\"to\":\"0495\",\"descr\":\"2W06\"}}]"
-        );
-        TDHandler.stopLogging();
-        tdh.message(
-                 headers,
-                "[{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"X7\",\"time\":\"1657126531000\",\"address\":\"24\",\"data\":\"06\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"R3\",\"time\":\"1657126531000\",\"address\":\"07\",\"data\":\"00\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"WY\",\"time\":\"1657126530000\",\"address\":\"1E\",\"data\":\"00\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"X0\",\"time\":\"1657126531000\",\"address\":\"66\",\"data\":\"0F\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"SV\",\"time\":\"1657126531000\",\"address\":\"08\",\"data\":\"EB\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"ZB\",\"time\":\"1657126531000\",\"address\":\"07\",\"data\":\"08\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"EA\",\"time\":\"1657126531000\",\"from\":\"P601\",\"to\":\"P609\",\"descr\":\"2Y11\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"NK\",\"time\":\"1657126531000\",\"address\":\"50\",\"data\":\"1F\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"EB\",\"time\":\"1657126531000\",\"from\":\"P601\",\"to\":\"P609\",\"descr\":\"2Y11\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"R2\",\"time\":\"1657126531000\",\"address\":\"11\",\"data\":\"7F\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"ZG\",\"time\":\"1657126531000\",\"from\":\"EW24\",\"to\":\"EW22\",\"descr\":\"1P60\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"R3\",\"time\":\"1657126531000\",\"address\":\"1B\",\"data\":\"F8\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"U3\",\"time\":\"1657126531000\",\"address\":\"29\",\"data\":\"C8\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"C2\",\"time\":\"1657126531000\",\"address\":\"7E\",\"data\":\"0A\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"EK\",\"time\":\"1657126531000\",\"address\":\"50\",\"data\":\"F6\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"X0\",\"time\":\"1657126531000\",\"address\":\"6B\",\"data\":\"C0\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"M1\",\"time\":\"1657126531000\",\"from\":\"0044\",\"to\":\"0010\",\"descr\":\"1L17\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"Q4\",\"time\":\"1657126531000\",\"address\":\"21\",\"data\":\"20\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"X3\",\"time\":\"1657126531000\",\"address\":\"4A\",\"data\":\"40\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"EB\",\"time\":\"1657126531000\",\"from\":\"S684\",\"to\":\"S686\",\"descr\":\"1D57\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"Q0\",\"time\":\"1657126531000\",\"address\":\"0A\",\"data\":\"A0\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"T2\",\"time\":\"1657126531000\",\"address\":\"4A\",\"data\":\"00\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"R3\",\"time\":\"1657126531000\",\"address\":\"1B\",\"data\":\"F8\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"DA\",\"time\":\"1657126531000\",\"address\":\"22\",\"data\":\"02\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"M3\",\"time\":\"1657126531000\",\"address\":\"0B\",\"data\":\"B0\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"Q3\",\"time\":\"1657126531000\",\"address\":\"58\",\"data\":\"BC\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"YO\",\"time\":\"1657126531000\",\"address\":\"06\",\"data\":\"00\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"D9\",\"time\":\"1657126531000\",\"address\":\"33\",\"data\":\"C6\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"Y9\",\"time\":\"1657126531000\",\"address\":\"10\",\"data\":\"10\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"M4\",\"time\":\"1657126531000\",\"address\":\"08\",\"data\":\"59\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"Q0\",\"time\":\"1657126531000\",\"from\":\"0142\",\"to\":\"146B\",\"descr\":\"9U49\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"Q2\",\"time\":\"1657126531000\",\"from\":\"0491\",\"to\":\"0495\",\"descr\":\"2W06\"}}]"
-        );
-        TDHandler.startLogging();
-        tdh.message(
-                 headers,
-                "[{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"X7\",\"time\":\"1657126531000\",\"address\":\"24\",\"data\":\"06\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"R3\",\"time\":\"1657126531000\",\"address\":\"07\",\"data\":\"00\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"WY\",\"time\":\"1657126530000\",\"address\":\"1E\",\"data\":\"00\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"X0\",\"time\":\"1657126531000\",\"address\":\"66\",\"data\":\"0F\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"SV\",\"time\":\"1657126531000\",\"address\":\"08\",\"data\":\"EB\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"ZB\",\"time\":\"1657126531000\",\"address\":\"07\",\"data\":\"08\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"EA\",\"time\":\"1657126531000\",\"from\":\"P601\",\"to\":\"P609\",\"descr\":\"2Y11\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"NK\",\"time\":\"1657126531000\",\"address\":\"50\",\"data\":\"1F\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"EB\",\"time\":\"1657126531000\",\"from\":\"P601\",\"to\":\"P609\",\"descr\":\"2Y11\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"R2\",\"time\":\"1657126531000\",\"address\":\"11\",\"data\":\"7F\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"ZG\",\"time\":\"1657126531000\",\"from\":\"EW24\",\"to\":\"EW22\",\"descr\":\"1P60\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"R3\",\"time\":\"1657126531000\",\"address\":\"1B\",\"data\":\"F8\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"U3\",\"time\":\"1657126531000\",\"address\":\"29\",\"data\":\"C8\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"C2\",\"time\":\"1657126531000\",\"address\":\"7E\",\"data\":\"0A\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"EK\",\"time\":\"1657126531000\",\"address\":\"50\",\"data\":\"F6\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"X0\",\"time\":\"1657126531000\",\"address\":\"6B\",\"data\":\"C0\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"M1\",\"time\":\"1657126531000\",\"from\":\"0044\",\"to\":\"0010\",\"descr\":\"1L17\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"Q4\",\"time\":\"1657126531000\",\"address\":\"21\",\"data\":\"20\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"X3\",\"time\":\"1657126531000\",\"address\":\"4A\",\"data\":\"40\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"EB\",\"time\":\"1657126531000\",\"from\":\"S684\",\"to\":\"S686\",\"descr\":\"1D57\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"Q0\",\"time\":\"1657126531000\",\"address\":\"0A\",\"data\":\"A0\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"T2\",\"time\":\"1657126531000\",\"address\":\"4A\",\"data\":\"00\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"R3\",\"time\":\"1657126531000\",\"address\":\"1B\",\"data\":\"F8\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"DA\",\"time\":\"1657126531000\",\"address\":\"22\",\"data\":\"02\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"M3\",\"time\":\"1657126531000\",\"address\":\"0B\",\"data\":\"B0\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"Q3\",\"time\":\"1657126531000\",\"address\":\"58\",\"data\":\"BC\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"YO\",\"time\":\"1657126531000\",\"address\":\"06\",\"data\":\"00\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"D9\",\"time\":\"1657126531000\",\"address\":\"33\",\"data\":\"C6\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"Y9\",\"time\":\"1657126531000\",\"address\":\"10\",\"data\":\"10\"}},{\"SF_MSG\":{\"msg_type\":\"SF\",\"area_id\":\"M4\",\"time\":\"1657126531000\",\"address\":\"08\",\"data\":\"59\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"Q0\",\"time\":\"1657126531000\",\"from\":\"0142\",\"to\":\"146B\",\"descr\":\"9U49\"}},{\"CA_MSG\":{\"msg_type\":\"CA\",\"area_id\":\"Q2\",\"time\":\"1657126531000\",\"from\":\"0491\",\"to\":\"0495\",\"descr\":\"2W06\"}}]"
-        );
-    }
-    */
 
     @Override
     public void onMessage(Message msg)

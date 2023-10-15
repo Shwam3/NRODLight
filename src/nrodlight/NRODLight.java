@@ -23,6 +23,8 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class NRODLight
 {
@@ -119,7 +121,7 @@ public class NRODLight
         emailUpdate("Sigmaps Startup - " + date, "Sigmaps starting at " + date, false);
 
         try { DBHandler.getConnection(); } // Initialise database connection
-        catch (SQLException ex) { printThrowable(ex, "Startup"); }
+        catch (SQLException ex) { printErr("[Startup] Exception connecting to database: " + ex); }
 
         try
         {
@@ -132,29 +134,22 @@ public class NRODLight
                         .filter(File::isFile)
                         .filter(File::canRead)
                         .filter(f -> f.getName().endsWith(".td"))
-                        .forEach(f ->
-                        {
-                            try (final BufferedReader br = new BufferedReader(new FileReader(f)))
-                            {
-                                final JSONObject data = new JSONObject(new JSONTokener(br));
-                                data.keys().forEachRemaining(k -> TDHandler.DATA_MAP.putIfAbsent(k, data.getString(k)));
-                                count.incrementAndGet();
-                            } catch (IOException e) {
-                                printErr("[TD-Startup] Cannot read " + f.getName());
-                            } catch (JSONException e) {
-                                printErr("[TD-Startup] Malformed JSON in " + f.getName());
-                            }
-                        });
+                        .sorted(
+                                Comparator.<File, String>comparing(f -> f.getName().split("\\.", 2)[1]).reversed()
+                                .thenComparing(f -> f.getName().split("\\.", 2)[0])
+                        )
+                        .forEach(f -> readTDDataFile(f, false, count));
             }
+            TDHandler.saveTDData(null);
             printOut("[Startup] Finished reading TD data, read " + count + " files", true);
         }
-        catch (Exception e) { NRODLight.printThrowable(e, "TD-Startup"); }
+        catch (Exception e) { NRODLight.printThrowable(e, "Startup"); }
 
         executor.execute(() -> {
             try {
                 EASMWebSocket.updateDelayData();
-            } catch (SQLException e) {
-                printThrowable(e, "Startup-Delays");
+            } catch (SQLException ex) {
+                printErr("[Startup] Exception updating delays: " + ex);
             }
         });
 
@@ -300,7 +295,7 @@ public class NRODLight
                     try {
                         EASMWebSocket.updateDelayData();
                     } catch (SQLException ex) {
-                        printThrowable(ex, "Delays");
+                        printErr("[Delays] Exception updating delays: " + ex);
                     }
 
                     final JSONObject delayData = EASMWebSocket.getDelayData();
@@ -497,7 +492,7 @@ public class NRODLight
         }
     }
 
-    public static void emailUpdate(String subject, String content, boolean waitFor)
+    public static void emailUpdate(final String subject, final String content, final boolean waitFor)
     {
         if (config.has("update-email") && config.getString("update-email").contains("@"))
         {
@@ -518,5 +513,64 @@ public class NRODLight
     public static ScheduledExecutorService getExecutor()
     {
         return executor;
+    }
+
+    private static void readTDDataFile(final File f, final boolean isNew, final AtomicInteger count) {
+        List<String> lines = null;
+        try {
+            lines = Files.readAllLines(f.toPath());
+        } catch (IOException e) {
+            printErr("[Startup] Cannot read " + f.getName());
+
+            if (!isNew) {
+                readTDDataFile(new File(f.getAbsoluteFile() + ".new"), true, count);
+                return;
+            }
+        }
+
+        if (lines != null) {
+            if (lines.get(0).charAt(0) == '{') {
+                try {
+                    JSONObject data = new JSONObject(String.join("", lines));
+                    data.keys().forEachRemaining((k) -> TDHandler.DATA_MAP.putIfAbsent(k, data.getString(k)));
+                    printOut("[Startup] Read JSON data from " + f.getName() + ", will be converted", true);
+                } catch (JSONException jex) {
+                    printErr("[Startup] Malformed JSON in " + f.getName());
+
+                    if (!isNew) {
+                        readTDDataFile(new File(f.getAbsoluteFile() + ".new"), true, count);
+                        return;
+                    }
+                }
+            } else {
+                Iterator<String> iter = lines.iterator();
+                Pattern p = Pattern.compile("^((.{4}:[1-8])\t([01])|(.{6})\t(.{4})?)$");
+
+                if (iter.hasNext()) {
+                    String lineCountStr = iter.next();
+                    int lineCount = Integer.parseInt(lineCountStr);
+                    if (lineCount != lines.size() - 1) {
+                        printErr("[Startup] Possible missing data from " + f.getName() + " (" + lineCountStr + "/" + (lines.size() - 1) + ")");
+                    }
+
+                    while (iter.hasNext()) {
+                        String key = iter.next();
+                        Matcher m = p.matcher(key);
+                        if (m.matches()) {
+                            if (key.charAt(4) == ':') {
+                                TDHandler.DATA_MAP.putIfAbsent(m.group(2), "0".equals(m.group(3)) ? "0" : "1");
+                            } else {
+                                TDHandler.DATA_MAP.putIfAbsent(m.group(4), m.group(5) == null ? "" : m.group(5));
+                            }
+                        } else {
+                            printErr("[Startup] Malformed line in " + f.getName() + ": " + key);
+                        }
+                    }
+                } else {
+                    printErr("[Startup] Possible missing data from " + f.getName() + " (null/0)");
+                }
+            }
+            count.incrementAndGet();
+        }
     }
 }

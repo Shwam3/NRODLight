@@ -5,6 +5,7 @@ import nrodlight.db.Queries;
 import org.json.JSONObject;
 
 import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.sql.Types;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -89,6 +90,7 @@ public class RateMonitor
                     ps.executeUpdate();
                 }
             }
+            catch(SQLException sqlEx) { NRODLight.printErr("[RateMonitor] Exception updating RateMonitor: " + sqlEx); }
             catch(Exception e) { NRODLight.printThrowable(e, "RateMonitor");}
         }, wait.getTimeInMillis() - currTime, 1000 * 60, TimeUnit.MILLISECONDS);
     }
