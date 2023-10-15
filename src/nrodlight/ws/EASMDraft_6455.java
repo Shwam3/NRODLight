@@ -14,8 +14,8 @@ public class EASMDraft_6455 extends Draft_6455
     {
         super(new PerMessageDeflateExtension());
 
-        PerMessageDeflateExtension pmde = (PerMessageDeflateExtension) getExtension();
-        pmde.setClientNoContextTakeover(false);
+        //PerMessageDeflateExtension pmde = (PerMessageDeflateExtension) getExtension();
+        //pmde.setClientNoContextTakeover(false);
     }
 
     @Override
