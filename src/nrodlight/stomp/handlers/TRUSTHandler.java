@@ -243,15 +243,15 @@ public class TRUSTHandler implements MessageListener
                                         {
                                             if (rs2.first())
                                             {
-                                                String uid = rs2.getString(1).substring(0, 6);
+                                                String uid1 = rs2.getString(1).substring(0, 6);
                                                 boolean diffUIDs = false;
                                                 while (rs2.next())
                                                 {
-                                                    String key = rs2.getString(1).substring(0, 6);
-                                                    if (!key.equals(uid))
+                                                    String uid2 = rs2.getString(1).substring(0, 6);
+                                                    if (!uid2.equals(uid1))
                                                     {
                                                         diffUIDs = true;
-                                                        printTRUST("Could not infer activation for " + body.getString("train_id") + ", multiple matches (" + uid + "/" + key + ", maybe more)");
+                                                        printTRUST("Could not infer activation for " + body.getString("train_id") + ", multiple matches (" + uid1 + "/" + uid2 + ", maybe more)");
                                                         break;
                                                     }
                                                 }

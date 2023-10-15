@@ -34,14 +34,16 @@ public class Queries
             "l2.scheduled_pass=?) ORDER BY loc_index ASC LIMIT 1) ORDER BY loc_index ASC LIMIT 1";
     public static final String TRUST_3_FIND_ACTIVATION = "SELECT train_id FROM activations WHERE train_id=?";
     public static final String TRUST_3_INFER_SCHEDULE = "SELECT l.schedule_key,date_to FROM schedule_locations l " +
-            "INNER JOIN schedules s ON s.schedule_key=l.schedule_key INNER JOIN corpus c ON l.tiploc=c.tiploc WHERE c" +
-            ".stanox=? AND (scheduled_arrival=? AND 1=? OR scheduled_departure=? AND 1=? OR scheduled_pass=?) AND " +
-            "(SUBSTR(days_run, ?, 1)='1' OR SUBSTR(days_run, ?, 1)='1' AND over_midnight=1) AND (CAST(s.date_from AS " +
-            "INT)<=? OR (CAST(s.date_from AS INT)<=? AND over_midnight=1)) AND (CAST(s.date_to AS INT)>=? OR (CAST(s" +
-            ".date_to AS INT)>=? AND over_midnight=1)) AND (SELECT COUNT(schedule_key) FROM schedules x WHERE x" +
-            ".schedule_uid=s.schedule_uid AND x.stp_indicator='C' AND (CAST(x.date_from AS INT)<=? OR (CAST(x" +
-            ".date_from AS INT)<=? AND x.over_midnight=1)))=0 AND (s.identity = '' OR ?=0 OR s.identity=?) GROUP BY s" +
-            ".schedule_uid ORDER BY s.schedule_source DESC, s.stp_indicator";
+            "INNER JOIN schedules s ON s.schedule_key=l.schedule_key INNER JOIN corpus c ON l.tiploc=c.tiploc WHERE c." +
+            "stanox=? AND (scheduled_arrival=? AND 1=? OR scheduled_departure=? AND 1=? OR scheduled_pass=?) AND " +
+            "(SUBSTR(days_run, ?, 1)='1' OR SUBSTR(days_run, ?, 1)='1' AND over_midnight=1 AND " +
+            "HOUR(CURRENT_TIMESTAMP)<12) AND (CAST(s.date_from AS INT)<=? OR (CAST(s.date_from AS INT)<=? AND " +
+            "over_midnight=1 AND HOUR(CURRENT_TIMESTAMP)<12)) AND (CAST(s.date_to AS INT)>=? OR " +
+            "(CAST(s.date_to AS INT)>=? AND over_midnight=1 AND HOUR(CURRENT_TIMESTAMP)<12)) AND (SELECT " +
+            "COUNT(schedule_key) FROM schedules x WHERE x.schedule_uid=s.schedule_uid AND x.stp_indicator='C' AND " +
+            "(CAST(x.date_from AS INT)<=? OR (CAST(x.date_from AS INT)<=? AND x.over_midnight=1 AND " +
+            "HOUR(CURRENT_TIMESTAMP)<12)))=0 AND (s.identity = '' OR ?=0 OR s.identity=?) GROUP BY s.schedule_uid " +
+            "ORDER BY s.schedule_source DESC, s.stp_indicator";
     public static final String TRUST_3_ADD_INFERRED = "INSERT INTO activations (train_id,train_id_current," +
             "start_timestamp,schedule_key,schedule_uid,schedule_date_from,schedule_date_to,stp_indicator," +
             "schedule_source,creation_timestamp,last_update,inferred) VALUES (?,?,?,?,?,?,?,?,?,?,?,1)";
