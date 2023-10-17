@@ -251,7 +251,8 @@ public class TRUSTHandler implements MessageListener
                                                     if (!uid2.equals(uid1))
                                                     {
                                                         diffUIDs = true;
-                                                        printTRUST("Could not infer activation for " + body.getString("train_id") + ", multiple matches (" + uid1 + "/" + uid2 + ", maybe more)");
+                                                        printTRUST("Could not infer activation for " + body.getString("train_id") + ", multiple matches (" + uid1 + "/" + uid2 + ", maybe more). " +
+                                                                "No " + body.get("event_type") + " at " + body.getString("loc_stanox") + " at " + time);
                                                         break;
                                                     }
                                                 }
