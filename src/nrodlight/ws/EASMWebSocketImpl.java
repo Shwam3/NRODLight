@@ -58,7 +58,7 @@ public class EASMWebSocketImpl extends WebSocketImpl
 
     public boolean optSplitFullMessages()
     {
-        return clientOptions.get("splitFullMessages");
+        return true; //clientOptions.get("splitFullMessages");
     }
 
     public boolean optDelayColouration()
@@ -106,27 +106,19 @@ public class EASMWebSocketImpl extends WebSocketImpl
             content.put("messageID", "%nextid%");
             content.put("timestamp", System.currentTimeMillis());
             message.put("Message", content);
-            if (!optSplitFullMessages())
-            {
-                content.put("message", TDHandler.DATA_MAP);
-
-                send(message.toString());
-            }
-            else
-            {
+            if (optSplitFullMessages()) {
                 Map<String, JSONObject> splitMessages = new HashMap<>();
-                TDHandler.DATA_MAP.forEach((k,v) ->
-                {
+                TDHandler.DATA_MAP.forEach((k, v) -> {
                     String area = k.substring(0, 2);
-                    if (!areas.contains(area) && !"XX".equals(area))
+                    if (!areas.contains(area) && !"XX".equals(area)) {
                         return;
+                    }
 
                     JSONObject obj = splitMessages.getOrDefault(area, new JSONObject());
                     splitMessages.putIfAbsent(area, obj);
                     obj.put(k, v);
                 });
-                splitMessages.forEach((k,v) ->
-                {
+                splitMessages.forEach((k, v) -> {
                     content.put("td_area", k);
                     content.put("message", v);
                     send(message.toString());
