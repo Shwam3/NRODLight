@@ -53,46 +53,7 @@ public class RateMonitor
         wait.set(Calendar.SECOND, 0);
         wait.add(Calendar.MINUTE, 1);
 
-        NRODLight.getExecutor().scheduleAtFixedRate(() ->
-        {
-            try
-            {
-                try (PreparedStatement ps = DBHandler.getConnection().prepareStatement(Queries.RATE_MONITOR))
-                {
-                    ps.setLong(1, (System.currentTimeMillis() / 60000L) * 60L);
-
-                    for (int i = 0; i < columns.length; i++)
-                    {
-                        if (isCount[i])
-                        {
-                            if (i == 4) // WSConnections
-                                ps.setInt(2 + i, (int) countMap.get(columns[i]).getAndSet(NRODLight.webSocket != null ? NRODLight.webSocket.getConnectionCount() : 0));
-                            else
-                                ps.setInt(2 + i, (int) countMap.get(columns[i]).getAndSet(0));
-                        }
-                        else if (isString[i])
-                        {
-                            String value = stringMap.get(columns[i]).toString();
-                            stringMap.get(columns[i]).clear();
-                            ps.setString(2 + i, value);
-                        }
-                        else
-                        {
-                            List<Double> values = new ArrayList<>(averageMap.get(columns[i]));
-                            averageMap.get(columns[i]).clear();
-                            if (values.isEmpty())
-                                ps.setNull(2 + i, Types.INTEGER);
-                            else
-                                ps.setInt(2 + i, (int) Math.floor(values.stream().mapToLong(v -> (long) (v * 1000)).average().orElse(0)));
-                        }
-                    }
-
-                    ps.executeUpdate();
-                }
-            }
-            catch(SQLException sqlEx) { NRODLight.printErr("[RateMonitor] Exception updating RateMonitor: " + sqlEx); }
-            catch(Exception e) { NRODLight.printThrowable(e, "RateMonitor");}
-        }, wait.getTimeInMillis() - currTime, 1000 * 60, TimeUnit.MILLISECONDS);
+        NRODLight.getExecutor().scheduleAtFixedRate(this::commitData, wait.getTimeInMillis() - currTime, 1000 * 60, TimeUnit.MILLISECONDS);
     }
 
     public static RateMonitor getInstance()
@@ -149,5 +110,45 @@ public class RateMonitor
         countMap.get("TRUSTChIdents").addAndGet(coi);
         countMap.get("TRUSTChLocations").addAndGet(col);
         countMap.get("InferredActivations").addAndGet(inf);
+    }
+
+    void commitData() {
+        try
+        {
+            try (PreparedStatement ps = DBHandler.getConnection().prepareStatement(Queries.RATE_MONITOR))
+            {
+                ps.setLong(1, (System.currentTimeMillis() / 60000L) * 60L);
+
+                for (int i = 0; i < columns.length; i++)
+                {
+                    if (isCount[i])
+                    {
+                        if (i == 4) // WSConnections
+                            ps.setInt(2 + i, (int) countMap.get(columns[i]).getAndSet(NRODLight.webSocket != null ? NRODLight.webSocket.getConnectionCount() : 0));
+                        else
+                            ps.setInt(2 + i, (int) countMap.get(columns[i]).getAndSet(0));
+                    }
+                    else if (isString[i])
+                    {
+                        String value = stringMap.get(columns[i]).toString();
+                        stringMap.get(columns[i]).clear();
+                        ps.setString(2 + i, value);
+                    }
+                    else
+                    {
+                        List<Double> values = new ArrayList<>(averageMap.get(columns[i]));
+                        averageMap.get(columns[i]).clear();
+                        if (values.isEmpty())
+                            ps.setNull(2 + i, Types.INTEGER);
+                        else
+                            ps.setInt(2 + i, (int) Math.floor(values.stream().mapToLong(v -> (long) (v * 1000)).average().orElse(0)));
+                    }
+                }
+
+                ps.executeUpdate();
+            }
+        }
+        catch(SQLException sqlEx) { NRODLight.printErr("[RateMonitor] Exception updating RateMonitor: " + sqlEx); }
+        catch(Exception e) { NRODLight.printThrowable(e, "RateMonitor");}
     }
 }

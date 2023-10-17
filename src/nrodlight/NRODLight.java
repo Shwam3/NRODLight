@@ -136,11 +136,11 @@ public class NRODLight
                         .filter(f -> f.getName().endsWith(".td"))
                         .sorted(
                                 Comparator.<File, String>comparing(f -> f.getName().split("\\.", 2)[1]).reversed()
+                                .thenComparing(f -> !f.getName().split("\\.", 2)[0].isEmpty())
                                 .thenComparing(f -> f.getName().split("\\.", 2)[0])
                         )
                         .forEach(f -> readTDDataFile(f, false, count));
             }
-            TDHandler.saveTDData(null);
             printOut("[Startup] Finished reading TD data, read " + count + " files", true);
         }
         catch (Exception e) { NRODLight.printThrowable(e, "Startup"); }
@@ -156,6 +156,7 @@ public class NRODLight
         Runtime.getRuntime().addShutdownHook(new Thread(() ->
         {
             printOut("[Main] Stopping...", true);
+
             STOP.getAndSet(true);
 
             executor.shutdown();
@@ -168,13 +169,16 @@ public class NRODLight
                 catch (Throwable ignored) {}
             }
 
+            ((TDHandler) TDHandler.getInstance()).saveTDDataFull(true);
+
+            RateMonitor.getInstance().commitData();
+
             DBHandler.closeConnection();
 
             printOut("[Main] Stopped", true);
         }, "NRODShutdown"));
 
-        Thread fileWatcher = new Thread(() ->
-        {
+        Thread fileWatcher = new Thread(() -> {
             printOut("[Startup] File watcher started", true);
 
             final Path configPath = new File(EASM_STORAGE_DIR, "config.json").toPath();
@@ -250,19 +254,15 @@ public class NRODLight
 
         ensureServerOpen();
 
-        try
-        {
+        try {
             ConnectionManager.start();
         }
-        catch (JMSException ex)
-        {
+        catch (JMSException ex) {
             printThrowable(ex, "ActiveMQ");
         }
 
-        executor.scheduleAtFixedRate(() ->
-        {
-            try
-            {
+        executor.scheduleAtFixedRate(() -> {
+            try {
                 JSONObject message = new JSONObject();
                 JSONObject content = new JSONObject();
                 content.put("type", "SEND_ALL");
@@ -274,24 +274,21 @@ public class NRODLight
 
                 Map<String, JSONObject> splitMessages = new HashMap<>();
                 Map<String, String> splitMessagesStr = new HashMap<>();
-                TDHandler.DATA_MAP.forEach((k,v) ->
-                {
+                TDHandler.DATA_MAP.forEach((k, v) -> {
                     JSONObject obj = Optional.ofNullable(splitMessages.get(k.substring(0, 2))).orElseGet(JSONObject::new);
                     splitMessages.putIfAbsent(k.substring(0, 2), obj);
                     obj.put(k, v);
                 });
                 content.remove("message");
                 content.put("timestamp", System.currentTimeMillis());
-                splitMessages.forEach((k,v) ->
-                {
+                splitMessages.forEach((k, v) -> {
                     content.put("message", v);
                     content.put("td_area", k);
                     splitMessagesStr.put(k, message.toString());
                 });
 
                 ensureServerOpen();
-                if (webSocket != null)
-                {
+                if (webSocket != null) {
                     try {
                         EASMWebSocket.updateDelayData();
                     } catch (SQLException ex) {
@@ -317,9 +314,18 @@ public class NRODLight
                         }
                     }
                 }
+            } catch (Exception e) {
+                printThrowable(e, "SendAll");
             }
-            catch (Exception e) { printThrowable(e, "SendAll"); }
         }, 500, 30000, TimeUnit.MILLISECONDS);
+
+        executor.scheduleAtFixedRate(() -> {
+            try {
+                ((TDHandler) TDHandler.getInstance()).saveTDDataFull(false);
+            } catch (Exception ex) {
+                printThrowable(ex, "[TD]");
+            }
+        }, 5000, 5000, TimeUnit.MILLISECONDS);
     }
 
     //<editor-fold defaultstate="collapsed" desc="Print methods">
@@ -519,12 +525,17 @@ public class NRODLight
         List<String> lines = null;
         try {
             lines = Files.readAllLines(f.toPath());
-        } catch (IOException e) {
-            printErr("[Startup] Cannot read " + f.getName());
+        } catch (IOException ex) {
+            printErr("[Startup] Cannot read " + f.getName() + ": " + ex);
 
             if (!isNew) {
                 readTDDataFile(new File(f.getAbsoluteFile() + ".new"), true, count);
                 return;
+            }
+        } finally {
+            if (f.getName().endsWith(".c.td" + (isNew ? ".new" : "")) || f.getName().endsWith(".s.td" + (isNew ? ".new" : ""))) {
+                printOut("[Startup] Deleting " + f.getName(), true);
+                f.delete();
             }
         }
 

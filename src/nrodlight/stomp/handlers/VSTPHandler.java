@@ -100,7 +100,7 @@ public class VSTPHandler implements MessageListener
                     psBSDel.executeUpdate();
                 }
 
-                try (PreparedStatement psBSDel = conn.prepareStatement(Queries.VSTP_DEL_COR))
+                try (PreparedStatement psBSDel = conn.prepareStatement(Queries.VSTP_DEL_CER))
                 {
                     psBSDel.setString(1, schedule_key);
                     psBSDel.executeUpdate();
@@ -349,7 +349,7 @@ public class VSTPHandler implements MessageListener
 
     private static String vstpToCifTime(final String time)
     {
-        if (time.trim().length() == 0)
+        if (time.trim().isEmpty())
             return "";
         else if ("00".equals(time.substring(4)))
             return time.substring(0, 4);

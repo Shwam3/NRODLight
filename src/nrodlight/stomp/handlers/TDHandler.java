@@ -19,14 +19,22 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class TDHandler implements MessageListener
 {
     private static PrintWriter logStream;
     private static File logFile;
     private static String lastLogDate = "";
+
+    private static final ReentrantLock saveFileLock = new ReentrantLock();
+
+    private static final Set<String> modifiedAreasSinceSave = new HashSet<>();
 
     private static MessageListener instance = null;
     private TDHandler()
@@ -36,7 +44,7 @@ public class TDHandler implements MessageListener
         if (NRODLight.config.optBoolean("TDLogging", false))
             startLogging();
 
-        saveTDData(null);
+        saveTDDataFull(true);
     }
     public static MessageListener getInstance()
     {
@@ -46,11 +54,7 @@ public class TDHandler implements MessageListener
         return instance;
     }
 
-    public static final Map<String, String> DATA_MAP = new ConcurrentSkipListMap<>(
-            Comparator.<String, String>comparing(a -> a.substring(0, 2)) // Sort by area, then C/S class, then ID
-            .thenComparing(a -> a.charAt(4) == ':')
-            .thenComparing(a -> a.substring(2, 6))
-    );
+    public static final Map<String, String> DATA_MAP = new ConcurrentHashMap<>();
 
     public void handleMessage(final String body, final long timestamp)
     {
@@ -206,9 +210,15 @@ public class TDHandler implements MessageListener
             catch (Exception e) { NRODLight.printThrowable(e, "TD"); }
         }
 
-        DATA_MAP.putAll(updateMap);
         updateClients(updateMap);
-        saveTDData(modifiedAreas);
+
+        saveFileLock.lock();
+        try {
+            DATA_MAP.putAll(updateMap);
+            saveTDDataSmall(updateMap, modifiedAreas);
+        } finally {
+            saveFileLock.unlock();
+        }
 
         RateMonitor.getInstance().onTDMessage(
                 (System.currentTimeMillis() - timestamp) / 1000d,
@@ -219,23 +229,25 @@ public class TDHandler implements MessageListener
     public static void updateClientsAndSave(Map<String, String> updateMap)
     {
         Set<String> modifiedAreas = new HashSet<>();
-        for (Iterator<Map.Entry<String, String>> iter = updateMap.entrySet().iterator(); iter.hasNext(); )
-        {
-            Map.Entry<String, String> pair = iter.next();
-            if (pair.getValue() == null)
-            {
-                String key = pair.getKey();
-                DATA_MAP.remove(key);
-                iter.remove(); //updateMap.remove(pair.getKey());
+        saveFileLock.lock();
+        try {
+            for (Iterator<Map.Entry<String, String>> iter = updateMap.entrySet().iterator(); iter.hasNext(); ) {
+                Map.Entry<String, String> pair = iter.next();
+                if (pair.getValue() == null) {
+                    String key = pair.getKey();
+                    DATA_MAP.remove(key);
+                    iter.remove();
+                }
+                modifiedAreas.add(pair.getKey().substring(0, 2));
             }
-            modifiedAreas.add(pair.getKey().substring(0, 2));
+            if (!updateMap.isEmpty()) {
+                DATA_MAP.putAll(updateMap);
+                updateClients(updateMap);
+            }
+            ((TDHandler) getInstance()).saveTDDataSmall(updateMap, modifiedAreas);
+        } finally {
+            saveFileLock.unlock();
         }
-        if (!updateMap.isEmpty())
-        {
-            DATA_MAP.putAll(updateMap);
-            updateClients(updateMap);
-        }
-        saveTDData(modifiedAreas);
     }
 
     private static void updateClients(Map<String, String> updateMap)
@@ -278,55 +290,120 @@ public class TDHandler implements MessageListener
         }
     }
 
-    @SuppressWarnings("unchecked")
-    public static void saveTDData(final Set<String> areasToSave)
+    public void saveTDDataFull(final boolean saveAll)
     {
-        //long start = System.nanoTime();
-        if (areasToSave == null || !areasToSave.isEmpty())
+        if (!modifiedAreasSinceSave.isEmpty() || saveAll)
         {
-            final File TDDataDir = new File(NRODLight.EASM_STORAGE_DIR, "TDData");
-            if (!TDDataDir.exists())
-                TDDataDir.mkdirs();
+            saveFileLock.lock();
 
-            String lastArea = "";
-            StringBuilder lines = new StringBuilder();
-            AtomicInteger count = new AtomicInteger();
-            for (Map.Entry<String, String> entry : DATA_MAP.entrySet()) {
-                String id = entry.getKey();
-                String val = entry.getValue();
-                String area = id.substring(0, 2);
+            try {
+                ConcurrentSkipListMap<String, String> copyDataMap = new ConcurrentSkipListMap<>(
+                        Comparator.<String, String>comparing(a -> a.substring(0, 2)) // Sort by area, then C/S class, then ID
+                                .thenComparing(a -> a.charAt(4) == ':')
+                                .thenComparing(a -> a.substring(2, 6))
+                );
+                copyDataMap.putAll(DATA_MAP);
+                Set<String> copyModifiedAreas = new HashSet<>(modifiedAreasSinceSave);
+                long time = System.currentTimeMillis();
+                modifiedAreasSinceSave.clear();
 
-                if (areasToSave == null || areasToSave.contains(area)) {
-                    if (lastArea.isEmpty()) {
-                        lastArea = area;
-                    }
+                saveFileLock.unlock();
 
-                    if (!area.equals(lastArea)) {
-                        try {
-                            lines.insert(0, '\n').insert(0, count.getAndSet(0));
-                            File newFile = new File(TDDataDir, lastArea + ".td.new");
-                            Files.writeString(newFile.toPath(), lines.toString(), StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
-                            Files.move(newFile.toPath(), new File(TDDataDir, lastArea + ".td").toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-                        } catch (IOException ex) {
-                            NRODLight.printThrowable(ex, "TD");
+                final File TDDataDir = new File(NRODLight.EASM_STORAGE_DIR, "TDData");
+                if (!TDDataDir.exists())
+                    TDDataDir.mkdirs();
+
+                String lastArea = "";
+                StringBuilder lines = new StringBuilder();
+                AtomicInteger count = new AtomicInteger();
+                for (Map.Entry<String, String> entry : copyDataMap.entrySet()) {
+                    String id = entry.getKey();
+                    String val = entry.getValue();
+                    String area = id.substring(0, 2);
+
+                    if (saveAll || copyModifiedAreas.contains(area)) {
+                        if (lastArea.isEmpty()) {
+                            lastArea = area;
                         }
-                        lines.setLength(0);
-                    }
-                    lines.append(id).append('\t').append(val).append('\n');
-                    count.incrementAndGet();
-                }
-                lastArea = area;
-            }
 
-            if (count.get() > 0 && (areasToSave == null || areasToSave.contains(lastArea))) {
-                try {
-                    lines.insert(0, '\n').insert(0, count.getAndSet(0));
-                    File newFile = new File(TDDataDir, lastArea + ".td.new");
-                    Files.writeString(newFile.toPath(), lines.toString(), StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
-                    Files.move(newFile.toPath(), new File(TDDataDir, lastArea + ".td").toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-                } catch (IOException ex) {
-                    NRODLight.printThrowable(ex, "TD");
+                        if (!area.equals(lastArea)) {
+                            try {
+                                lines.insert(0, '\n').insert(0, count.getAndSet(0));
+                                File newFile = new File(TDDataDir, lastArea + ".td.new");
+                                Files.writeString(newFile.toPath(), lines.toString(), StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
+                                Files.move(newFile.toPath(), new File(TDDataDir, lastArea + ".td").toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                            } catch (IOException ex) {
+                                NRODLight.printErr("[TD] Exception saving " + lastArea + ": " + ex);
+                            }
+                            lines.setLength(0);
+                        }
+                        lines.append(id).append('\t').append(val).append('\n');
+                        count.incrementAndGet();
+                    }
+                    lastArea = area;
                 }
+
+                if (count.get() > 0 && (saveAll || copyModifiedAreas.contains(lastArea))) {
+                    try {
+                        lines.insert(0, '\n').insert(0, count.getAndSet(0));
+                        File newFile = new File(TDDataDir, lastArea + ".td.new");
+                        Files.writeString(newFile.toPath(), lines.toString(), StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
+                        Files.move(newFile.toPath(), new File(TDDataDir, lastArea + ".td").toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                    } catch (IOException ex) {
+                        NRODLight.printErr("[TD] Exception saving " + lastArea + ": " + ex);
+                    }
+                }
+
+                final File[] TDDataFiles = TDDataDir.listFiles();
+                Pattern p = Pattern.compile("([0-9]+)\\.td");
+                if (TDDataFiles != null) {
+                    for (File file : TDDataFiles) {
+                         if (file.exists() && file.isFile()) {
+                             Matcher m = p.matcher(file.getName());
+                             if (m.matches() && Long.parseLong(m.group(1)) < time) {
+                                 if (!file.delete() && file.exists()) {
+                                     NRODLight.printErr("[TD] Couldn't delete " + file.getName());
+                                 }
+                             }
+                         }
+                    }
+                }
+            } catch (Exception ex) {
+                NRODLight.printThrowable(ex, "TD");
+            } finally {
+                if (saveFileLock.isHeldByCurrentThread()) {
+                    saveFileLock.unlock();
+                }
+            }
+        }
+    }
+
+    private void saveTDDataSmall(final Map<String, String> updateMap, Set<String> modifiedAreas)
+    {
+        if (updateMap != null && !updateMap.isEmpty())
+        {
+            saveFileLock.lock();
+            modifiedAreasSinceSave.addAll(modifiedAreas);
+            long time = System.currentTimeMillis();
+
+            try {
+                final File TDDataDir = new File(NRODLight.EASM_STORAGE_DIR, "TDData");
+                if (!TDDataDir.exists())
+                    TDDataDir.mkdirs();
+
+                StringBuilder lines = new StringBuilder().append(updateMap.size()).append('\n');
+                for (Map.Entry<String, String> entry : updateMap.entrySet()) {
+                    lines.append(entry.getKey()).append('\t').append(entry.getValue()).append('\n');
+                }
+                File newFile = new File(TDDataDir, time + ".td");
+                Files.writeString(newFile.toPath(), lines.toString(), StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
+            } catch (IOException ex) {
+                NRODLight.printErr("[TD] Exception saving " + time + ".td: " + ex);
+            } finally {
+                if (saveFileLock.getHoldCount() > 1) {
+                    NRODLight.printOut("[TD] saveFileLock > 0 on release");
+                }
+                saveFileLock.unlock();
             }
         }
     }
@@ -368,11 +445,14 @@ public class TDHandler implements MessageListener
             if (!fileReplaySave.exists())
             {
                 fileReplaySave.getParentFile().mkdirs();
-                try (BufferedWriter bw = new BufferedWriter(new FileWriter(fileReplaySave)))
-                {
+                saveFileLock.lock();
+                try (BufferedWriter bw = new BufferedWriter(new FileWriter(fileReplaySave))) {
                     new JSONObject().put("TDData", DATA_MAP).write(bw);
+                } catch (IOException e) {
+                    NRODLight.printThrowable(e, "TD");
+                } finally {
+                    saveFileLock.unlock();
                 }
-                catch (IOException e) { NRODLight.printThrowable(e, "TD"); }
             }
         }
     }

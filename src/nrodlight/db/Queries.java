@@ -58,7 +58,7 @@ public class Queries
     public static final String VSTP_CREATE_TIME = "SELECT creation_timestamp FROM schedules WHERE schedule_key = ?";
     public static final String VSTP_DEL_LOCS = "DELETE FROM schedule_locations WHERE schedule_key = ?";
     public static final String VSTP_DEL_SCHED = "DELETE FROM schedules WHERE schedule_key = ?";
-    public static final String VSTP_DEL_COR = "DELETE FROM change_en_route WHERE schedule_key = ?";
+    public static final String VSTP_DEL_CER = "DELETE FROM change_en_route WHERE schedule_key = ?";
     public static final String VSTP_INSERT_SCHED = "INSERT INTO schedules VALUES (?,?,?,?,?,'V',?,?,?,?,?,?,?,?,?,?," +
             "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
     public static final String VSTP_INSERT_LOCS = "INSERT INTO schedule_locations VALUES (?,?,?,?,'V',?,?,?,?,?,?,?," +
